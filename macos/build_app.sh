@@ -57,6 +57,9 @@ cp "$PROJECT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
   || /usr/libexec/PlistBuddy -c "Add :RSDevTag string $DEV_TAG" "$APP_BUNDLE/Contents/Info.plist"
 echo "→ Stamped Info.plist: CFBundleShortVersionString=$SHORT_VERSION$DEV_TAG CFBundleVersion=$BUILD_VERSION"
 
+# 5. Include the upstream MIT license in the signed bundle.
+cp "$PROJECT_DIR/../LICENSE" "$APP_BUNDLE/Contents/Resources/LICENSE"
+
 # 6. Создаём PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 

@@ -787,16 +787,19 @@ final class SettingsWindowController {
         view.addSubview(versionLabel)
         y -= 22
 
-        // Сайт — ссылкой под версией. Подпись — сам адрес: переводить нечего.
-        let siteLink = NSButton(title: "ruswitcher.app", target: self, action: #selector(openWebsite))
-        siteLink.isBordered = false
-        siteLink.attributedTitle = NSAttributedString(string: "ruswitcher.app", attributes: [
+        let attribution = L10n.languageCode == "ru"
+            ? "Независимый форк RuSwitcher"
+            : "Independent fork of RuSwitcher"
+        let upstreamLink = NSButton(title: attribution, target: self, action: #selector(openUpstreamProject))
+        upstreamLink.isBordered = false
+        upstreamLink.attributedTitle = NSAttributedString(string: attribution, attributes: [
             .foregroundColor: NSColor.linkColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
             .font: NSFont.systemFont(ofSize: 12),
         ])
-        siteLink.frame = NSRect(x: 97, y: y, width: 110, height: 18)   // у кнопки без рамки ~11 pt поля: текст ровно под заголовком
-        view.addSubview(siteLink)
+        upstreamLink.sizeToFit()
+        upstreamLink.frame.origin = NSPoint(x: 108, y: y)
+        view.addSubview(upstreamLink)
         y -= 40
 
         // Кнопка "Звезда на GitHub"
@@ -1232,8 +1235,8 @@ final class SettingsWindowController {
         }
     }
 
-    @objc private func openWebsite() {
-        if let url = SettingsManager.websiteLink(medium: "about") {
+    @objc private func openUpstreamProject() {
+        if let url = URL(string: "https://github.com/rashn/RuSwitcher") {
             NSWorkspace.shared.open(url)
         }
     }

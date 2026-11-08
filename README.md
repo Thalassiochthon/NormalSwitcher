@@ -1,4 +1,20 @@
-# RuSwitcher
+# NormalSwitcher
+
+NormalSwitcher — независимый форк [RuSwitcher](https://github.com/rashn/RuSwitcher) для macOS.
+
+NormalSwitcher is an independent macOS fork of [RuSwitcher](https://github.com/rashn/RuSwitcher).
+
+Сборка / Build (macOS 13+, Swift 6):
+
+```sh
+git clone --branch personal https://github.com/antonjas/NormalSwitcher.git
+cd NormalSwitcher
+./macos/build_app.sh
+```
+
+Приложение / App: `macos/NormalSwitcher.app`. [MIT License](LICENSE).
+
+## RuSwitcher
 
 <p align="center">
   <img src="macos/icon.png" width="128" alt="RuSwitcher icon">
