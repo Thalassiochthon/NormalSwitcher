@@ -51,11 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Task { @MainActor in Dict.warmUp() }
         }
 
-        // Скрытая иконка: reopen-событие приходит только УЖЕ работающему приложению.
-        // Свежий РУЧНОЙ запуск со скрытой иконкой без этого блока «тих» (ни иконки, ни
-        // окна — выглядит как «не запустилось»). Показываем настройки; автологин-старт
-        // (флаг login-item в oapp Apple event) остаётся тихим, как и положено.
-        if SettingsManager.shared.hideMenuBarIcon && !Self.launchedAsLoginItem() {
+        // Opening from Finder or Spotlight should be visible even if the menu bar is full.
+        // If permissions are missing, the wizard already handles the first interaction.
+        if !startedAsLoginItem && Self.permissionsGranted {
             settingsController.showWindow()
         }
     }
@@ -983,6 +981,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.toolTip = "NormalSwitcher"
+        statusItem.button?.setAccessibilityLabel("NormalSwitcher")
         // Иконку можно полностью скрыть (Настройки → Расширенные). isVisible вместо
         // removeStatusItem: система помнит позицию, а объект живёт — все пути обновления
         // (updateStatusIcon/rebuildMenu) продолжают работать без nil-проверок.

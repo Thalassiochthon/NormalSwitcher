@@ -70,7 +70,32 @@ final class SettingsManager: @unchecked Sendable {
         static let abbreviations = "com.ruswitcher.abbreviations"
     }
 
-    private init() {}
+    private init() {
+        importRuSwitcherInputPreferences()
+    }
+
+    private func importRuSwitcherInputPreferences() {
+        let domain = "com.antonjas.normalswitcher"
+        let marker = "\(domain).importedRuSwitcherInputPreferences"
+        guard Bundle.main.bundleIdentifier == domain,
+              !defaults.bool(forKey: marker) else { return }
+
+        let existing = defaults.persistentDomain(forName: domain) ?? [:]
+        let legacy = defaults.persistentDomain(forName: "com.ruswitcher.app") ?? [:]
+        let groups = [
+            [Keys.layout1ID, Keys.layout2ID],
+            [Keys.triggerKey, Keys.triggerLeftOnly, Keys.triggerRightOnly, Keys.triggerDoubleTap],
+        ]
+        // Keep each layout pair or trigger configuration together.
+        for keys in groups where keys.allSatisfy({ existing[$0] == nil }) {
+            for key in keys {
+                if let value = legacy[key] {
+                    defaults.set(value, forKey: key)
+                }
+            }
+        }
+        defaults.set(true, forKey: marker)
+    }
 
     // MARK: - Properties
 
