@@ -7,11 +7,11 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Layout Tap</string>
+	<string>NormalSwitcher</string>
 	<key>CFBundleExecutable</key>
 	<string>RuSwitcher</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.antonjas.layouttap</string>
+	<string>com.antonjas.normalswitcher</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleLocalizations</key>
@@ -34,7 +34,7 @@
 		<string>ka</string>
 	</array>
 	<key>CFBundleName</key>
-	<string>Layout Tap</string>
+	<string>NormalSwitcher</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

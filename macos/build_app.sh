@@ -2,7 +2,7 @@
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="Layout Tap"
+APP_NAME="NormalSwitcher"
 PRODUCT_NAME="RuSwitcher"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 # version.json живёт в КОРНЕ репозитория (живой фид обновлений) — не переносить!

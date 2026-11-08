@@ -493,7 +493,7 @@ final class SettingsManager: @unchecked Sendable {
     // MARK: - GitHub coordinates (единственный источник — чтобы при переименовании
     // репозитория правка была в одном месте)
     static let githubOwner = "antonjas"
-    static let githubRepo = "RuSwitcher"
+    static let githubRepo = "NormalSwitcher"
     static var githubURL: String { "https://github.com/\(githubOwner)/\(githubRepo)" }
     /// Сайт проекта. Правило то же, по которому сайт сам выбирает язык по системе: русский,
     /// украинский, белорусский и страны СНГ (по языку интерфейса или по региону системы) ведут

@@ -1018,7 +1018,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Строка версии (с dev-меткой для непубликуемых сборок) — чтобы было видно, какой билд.
         let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let devTag = Bundle.main.infoDictionary?["RSDevTag"] as? String ?? ""
-        let verItem = NSMenuItem(title: "RuSwitcher \(ver)\(devTag)", action: nil, keyEquivalent: "")
+        let verItem = NSMenuItem(title: "NormalSwitcher \(ver)\(devTag)", action: nil, keyEquivalent: "")
         verItem.isEnabled = false
         menu.addItem(verItem)
         let missingItem = NSMenuItem(title: L10n.menuPermissionsMissing, action: #selector(recheckPermissions), keyEquivalent: "")

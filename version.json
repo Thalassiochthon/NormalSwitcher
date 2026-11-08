@@ -2,6 +2,6 @@
   "version": "3.5.0",
   "build": "62",
   "dev": "",
-  "url": "https://github.com/antonjas/RuSwitcher/releases/latest",
-  "notes": "Layout Tap is a personal macOS build based on RuSwitcher 3.5.0."
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/latest",
+  "notes": "NormalSwitcher is a personal macOS build based on RuSwitcher 3.5.0."
 }

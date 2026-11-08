@@ -772,7 +772,7 @@ final class SettingsWindowController {
         view.addSubview(icon)
 
         // Название и версия
-        let titleLabel = NSTextField(labelWithString: "RuSwitcher")
+        let titleLabel = NSTextField(labelWithString: "NormalSwitcher")
         titleLabel.font = .boldSystemFont(ofSize: 20)
         titleLabel.frame = NSRect(x: 108, y: y, width: 332, height: 28)
         view.addSubview(titleLabel)
