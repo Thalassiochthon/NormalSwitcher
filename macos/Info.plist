@@ -7,15 +7,11 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>RuSwitcher</string>
+	<string>Layout Tap</string>
 	<key>CFBundleExecutable</key>
 	<string>RuSwitcher</string>
-	<key>CFBundleIconFile</key>
-	<string>RuSwitcher</string>
-	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.ruswitcher.app</string>
+	<string>com.antonjas.layouttap</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleLocalizations</key>
@@ -38,7 +34,7 @@
 		<string>ka</string>
 	</array>
 	<key>CFBundleName</key>
-	<string>RuSwitcher</string>
+	<string>Layout Tap</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

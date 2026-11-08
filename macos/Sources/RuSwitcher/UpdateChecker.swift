@@ -5,10 +5,10 @@ import Foundation
 @MainActor
 enum UpdateChecker {
     // URL к JSON с информацией о версии (стабильный фид).
-    private static let versionURL = "https://raw.githubusercontent.com/rashn/RuSwitcher/main/version.json"
+    private static let versionURL = "https://raw.githubusercontent.com/antonjas/RuSwitcher/personal/version.json"
     // Фид пред-релизов (бет). Читается ТОЛЬКО если включён бета-канал в настройках.
     // Может отсутствовать (404) — тогда бета-клиент просто остаётся на стабильном фиде.
-    private static let betaVersionURL = "https://raw.githubusercontent.com/rashn/RuSwitcher/main/version-beta.json"
+    private static let betaVersionURL = "https://raw.githubusercontent.com/antonjas/RuSwitcher/personal/version-beta.json"
 
     /// Структура JSON версии
     private struct VersionInfo: Decodable {

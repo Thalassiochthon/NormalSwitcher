@@ -2,7 +2,8 @@
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="RuSwitcher"
+APP_NAME="Layout Tap"
+PRODUCT_NAME="RuSwitcher"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 # version.json живёт в КОРНЕ репозитория (живой фид обновлений) — не переносить!
 # RS_VERSION_JSON переопределяет источник версии (для бета-сборок → version-beta.json).
@@ -24,16 +25,16 @@ echo "=== Building $APP_NAME v$SHORT_VERSION (build $BUILD_VERSION) ==="
 
 cd "$PROJECT_DIR"
 
-# 1. Собираем release — universal (arm64 + x86_64), чтобы работало и на Intel-маках
-SWIFT_BUILD_FLAGS="-c release --arch arm64 --arch x86_64"
-echo "→ swift build $SWIFT_BUILD_FLAGS (universal)..."
+# 1. Собираем для архитектуры этого Mac.
+SWIFT_BUILD_FLAGS="-c release"
+echo "→ swift build $SWIFT_BUILD_FLAGS..."
 # shellcheck disable=SC2086
 swift build $SWIFT_BUILD_FLAGS
 # shellcheck disable=SC2086
 BUILD_DIR=$(swift build --show-bin-path $SWIFT_BUILD_FLAGS 2>/dev/null)
 # Путь к продукту зависит от версии Swift (.build/apple/… до macOS 27, .build/out/… после),
 # поэтому спрашиваем его у самого swift — и останавливаемся, если ответа нет.
-if [ -z "$BUILD_DIR" ] || [ ! -f "$BUILD_DIR/$APP_NAME" ]; then
+if [ -z "$BUILD_DIR" ] || [ ! -f "$BUILD_DIR/$PRODUCT_NAME" ]; then
     echo "✗ swift build не сообщил, где лежит собранный $APP_NAME (получено: '${BUILD_DIR:-пусто}')" >&2
     exit 1
 fi
@@ -45,14 +46,7 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # 3. Копируем бинарник
-cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-
-# 3a. Самопроверка: бинарь обязан быть universal (arm64 + x86_64), иначе Intel-маки не запустят
-ARCHS=$(lipo -archs "$APP_BUNDLE/Contents/MacOS/$APP_NAME")
-if [[ "$ARCHS" != *"arm64"* || "$ARCHS" != *"x86_64"* ]]; then
-    echo "ERROR: бинарь не universal (получено: $ARCHS)"; exit 1
-fi
-echo "→ Universal OK: $ARCHS"
+cp "$BUILD_DIR/$PRODUCT_NAME" "$APP_BUNDLE/Contents/MacOS/$PRODUCT_NAME"
 
 # 4. Копируем Info.plist и штампуем версию из version.json
 cp "$PROJECT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
@@ -63,17 +57,14 @@ cp "$PROJECT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
   || /usr/libexec/PlistBuddy -c "Add :RSDevTag string $DEV_TAG" "$APP_BUNDLE/Contents/Info.plist"
 echo "→ Stamped Info.plist: CFBundleShortVersionString=$SHORT_VERSION$DEV_TAG CFBundleVersion=$BUILD_VERSION"
 
-# 5. Копируем иконку
-cp "$PROJECT_DIR/RuSwitcher.icns" "$APP_BUNDLE/Contents/Resources/RuSwitcher.icns"
-
 # 6. Создаём PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
 # 7. Подписываем Developer ID (разрешения macOS привязаны к подписи —
 #    при одинаковой подписи разрешения сохраняются между обновлениями)
 # RS_SIGN_ID переопределяет identity (CI без сертификата ставит "-" — ad-hoc).
-SIGN_ID="${RS_SIGN_ID:-Developer ID Application: Rashid Nasibulin (9GEWCZ59HK)}"
-echo "→ Code signing with Developer ID..."
+SIGN_ID="${RS_SIGN_ID:--}"
+echo "→ Code signing..."
 codesign --force --deep --sign "$SIGN_ID" \
     --options runtime \
     --entitlements "$PROJECT_DIR/RuSwitcher.entitlements" \
@@ -85,4 +76,4 @@ echo "App bundle: $APP_BUNDLE"
 echo "Signed with: $SIGN_ID"
 echo ""
 echo "To install:"
-echo "  cp -R $APP_BUNDLE /Applications/"
+echo "  cp -R \"$APP_BUNDLE\" /Applications/"
