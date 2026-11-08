@@ -4,6 +4,7 @@ import ApplicationServices
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
+    private var statusMenuPasteTarget: NSRunningApplication?
     private let keyboardMonitor = KeyboardMonitor()
     private let textConverter = TextConverter()
     private lazy var clipboardHistory = ClipboardHistory(converter: textConverter, keyboardMonitor: keyboardMonitor)
@@ -1036,6 +1037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// а текущую меняют и мимо нас — системным хоткеем).
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === statusItem.menu else { return }
+        statusMenuPasteTarget = NSWorkspace.shared.frontmostApplication
         menu.item(withTag: Self.permissionsItemTag)?.isHidden = permissionsGranted
         let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 2 : 0)
         for old in menu.items where old.tag == Self.layoutItemTag { menu.removeItem(old) }
@@ -1244,7 +1246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openClipboardHistory() {
-        DispatchQueue.main.async { [weak self] in self?.clipboardHistory.show() }
+        let target = statusMenuPasteTarget
+        DispatchQueue.main.async { [weak self] in self?.clipboardHistory.show(for: target) }
     }
 
     /// Окно «Что нового» — один раз после обновления, на языке приложения.

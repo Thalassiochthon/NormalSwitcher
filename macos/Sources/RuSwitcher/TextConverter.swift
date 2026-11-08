@@ -965,9 +965,9 @@ final class TextConverter {
         usleep(150_000) // 150мс — дать приложению вставить текст и обновить курсор
     }
 
-    func pasteFromClipboard() {
+    func pasteFromClipboard(to target: pid_t) {
         clearState()
-        simKey(keyCode: KC.letterV, flags: .maskCommand)
+        simKey(keyCode: KC.letterV, flags: .maskCommand, target: target)
     }
 
     /// Отменяет отложенное восстановление clipboard
@@ -1128,7 +1128,7 @@ final class TextConverter {
     }
 
     /// Симулирует нажатие клавиши с маркером (чтобы наш monitor игнорировал)
-    nonisolated private func simKey(keyCode: UInt16, flags: CGEventFlags) {
+    nonisolated private func simKey(keyCode: UInt16, flags: CGEventFlags, target: pid_t? = nil) {
         guard let source = makeSource() else { return }
 
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
@@ -1138,7 +1138,12 @@ final class TextConverter {
         keyDown.flags = flags
         keyUp.flags = flags
 
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        if let target {
+            keyDown.postToPid(target)
+            keyUp.postToPid(target)
+        } else {
+            keyDown.post(tap: .cghidEventTap)
+            keyUp.post(tap: .cghidEventTap)
+        }
     }
 }

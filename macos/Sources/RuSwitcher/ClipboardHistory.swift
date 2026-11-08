@@ -67,7 +67,10 @@ final class ClipboardHistory {
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private var menuOpen = false
-    private var selection: String?
+    private struct EntryChoice {
+        let text: String
+        let target: NSRunningApplication?
+    }
 
     var shortcutAvailable: Bool { hotkey != nil }
 
@@ -134,10 +137,9 @@ final class ClipboardHistory {
         if SettingsManager.shared.clipboardHistoryPersistent { _ = save() }
     }
 
-    func show() {
+    func show(for target: NSRunningApplication?) {
         guard SettingsManager.shared.clipboardHistoryEnabled, !menuOpen, NSApp.modalWindow == nil else { return }
         capture()
-        let target = NSWorkspace.shared.frontmostApplication
         let menu = NSMenu(title: L10n.clipboardHistoryTitle)
         if entries.isEmpty {
             let message: String
@@ -154,7 +156,7 @@ final class ClipboardHistory {
                 let item = menu.addItem(withTitle: text.count > 80 ? preview + "…" : preview,
                                         action: #selector(selectEntry(_:)), keyEquivalent: "")
                 item.target = self
-                item.representedObject = text
+                item.representedObject = EntryChoice(text: text, target: target)
             }
             menu.addItem(.separator())
             let clearItem = menu.addItem(withTitle: L10n.clipboardHistoryClear,
@@ -166,13 +168,13 @@ final class ClipboardHistory {
         menu.popUp(positioning: entries.isEmpty ? nil : menu.items.first,
                    at: NSEvent.mouseLocation, in: nil)
         menuOpen = false
-        guard let text = selection else { return }
-        selection = nil
-        DispatchQueue.main.async { [weak self] in self?.paste(text, into: target) }
     }
 
     @objc private func selectEntry(_ sender: NSMenuItem) {
-        selection = sender.representedObject as? String
+        guard let choice = sender.representedObject as? EntryChoice else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.paste(choice.text, into: choice.target)
+        }
     }
 
     @objc private func clearFromMenu() {
@@ -191,11 +193,34 @@ final class ClipboardHistory {
               !converter.hasTemporaryClipboardContents else { return }
         pasteboard.clearContents()
         guard pasteboard.setString(text, forType: .string) else { return }
-        // Leave the selected entry on the pasteboard even if focus or permissions changed.
-        guard let target, NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier,
-              AXIsProcessTrusted() else { return }
-        keyboardMonitor.resetInputTracking()
-        converter.pasteFromClipboard()
+        // Leave the entry available for manual paste if the original target cannot take focus.
+        guard let target, AXIsProcessTrusted() else {
+            rslog("Clipboard history: entry copied; paste target or accessibility permission unavailable")
+            return
+        }
+        deliverPaste(to: target, clipboardVersion: pasteboard.changeCount, attemptsLeft: 5)
+    }
+
+    private func deliverPaste(to target: NSRunningApplication, clipboardVersion: Int, attemptsLeft: Int) {
+        guard SettingsManager.shared.clipboardHistoryEnabled, !menuOpen, !target.isTerminated,
+              pasteboard.changeCount == clipboardVersion, !converter.hasTemporaryClipboardContents else { return }
+
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if frontPID == target.processIdentifier, !AutoSwitchPolicy.secureInputActive {
+            keyboardMonitor.resetInputTracking()
+            converter.pasteFromClipboard(to: target.processIdentifier)
+            return
+        }
+
+        // Menu tracking can keep focus briefly after the item action. Wait only while no
+        // other app has taken focus, and never redirect a paste to a different app.
+        guard attemptsLeft > 0, frontPID == nil || frontPID == ProcessInfo.processInfo.processIdentifier else {
+            rslog("Clipboard history: entry copied; automatic paste skipped (focus or secure input)")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+            self?.deliverPaste(to: target, clipboardVersion: clipboardVersion, attemptsLeft: attemptsLeft - 1)
+        }
     }
 
     func changeShortcut(_ shortcut: ClipboardHistoryShortcut) -> Bool {
@@ -234,7 +259,8 @@ final class ClipboardHistory {
                 guard status == noErr, id.signature == ClipboardHistory.shortcutID.signature,
                       id.id == ClipboardHistory.shortcutID.id else { return OSStatus(eventNotHandledErr) }
                 let history = Unmanaged<ClipboardHistory>.fromOpaque(context).takeUnretainedValue()
-                DispatchQueue.main.async { history.show() }
+                let target = NSWorkspace.shared.frontmostApplication
+                DispatchQueue.main.async { history.show(for: target) }
                 return noErr
             }
         }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler) == noErr
