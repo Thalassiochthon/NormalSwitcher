@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let keyboardMonitor = KeyboardMonitor()
     private let textConverter = TextConverter()
+    private lazy var clipboardHistory = ClipboardHistory(converter: textConverter, keyboardMonitor: keyboardMonitor)
     private let settingsController = SettingsWindowController()
     private let perAppLayoutManager = PerAppLayoutManager()
     private var permissionCheckTimer: Timer?
@@ -22,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startedAsLoginItem = Self.launchedAsLoginItem()   // Apple-событие запуска доступно только сейчас
+        clipboardHistory.configure()
         setupStatusItem()
         setupSettingsCallbacks()
         syncLoginItem()
@@ -102,6 +104,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         settingsController.onHideIconChanged = { [weak self] hide in
             self?.statusItem.isVisible = !hide
+        }
+        settingsController.onClipboardHistoryChanged = { [weak self] in
+            guard let self else { return }
+            let configured = self.clipboardHistory.configure()
+            self.rebuildMenu()
+            if !configured {
+                self.clipboardHistory.showStorageError()
+            } else if SettingsManager.shared.clipboardHistoryEnabled, !self.clipboardHistory.shortcutAvailable {
+                let alert = NSAlert()
+                alert.messageText = L10n.clipboardHistoryShortcutUnavailable
+                alert.runModal()
+            }
+        }
+        settingsController.onClipboardHistoryPersistenceChanged = { [weak self] in
+            guard let self, !self.clipboardHistory.updatePersistence() else { return }
+            self.clipboardHistory.showStorageError()
         }
     }
 
@@ -1077,6 +1095,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        if SettingsManager.shared.clipboardHistoryEnabled {
+            let title = L10n.clipboardHistoryTitle + (clipboardHistory.shortcutAvailable ? " (⌃⇧V)" : "")
+            let historyItem = NSMenuItem(title: title, action: #selector(openClipboardHistory), keyEquivalent: "")
+            historyItem.target = self
+            menu.addItem(historyItem)
+        }
+
         let updateItem = NSMenuItem(title: L10n.menuCheckUpdates, action: #selector(checkUpdates), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
@@ -1355,6 +1380,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.showWindow()
     }
 
+    @objc private func openClipboardHistory() {
+        DispatchQueue.main.async { [weak self] in self?.clipboardHistory.show() }
+    }
+
     @objc private func checkUpdates() {
         UpdateChecker.checkNow()
     }
@@ -1532,6 +1561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        clipboardHistory.stop()
         // Не теряем буфер обмена в 2-секундном окне отложенного восстановления
         // (актуально и при само-обновлении, которое завершает процесс).
         textConverter.flushPendingClipboardRestore()

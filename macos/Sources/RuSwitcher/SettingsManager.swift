@@ -9,6 +9,8 @@ final class SettingsManager: @unchecked Sendable {
     private let defaults = UserDefaults.standard
 
     private enum Keys {
+        static let clipboardHistoryEnabled = "com.antonjas.normalswitcher.clipboardHistory.enabled"
+        static let clipboardHistoryPersistent = "com.antonjas.normalswitcher.clipboardHistory.persistent"
         static let autoSwitch = "com.ruswitcher.autoSwitch"
         static let layout1ID = "com.ruswitcher.layout1ID"
         static let layout2ID = "com.ruswitcher.layout2ID"
@@ -98,6 +100,16 @@ final class SettingsManager: @unchecked Sendable {
     }
 
     // MARK: - Properties
+
+    var clipboardHistoryEnabled: Bool {
+        get { defaults.bool(forKey: Keys.clipboardHistoryEnabled) }
+        set { defaults.set(newValue, forKey: Keys.clipboardHistoryEnabled) }
+    }
+
+    var clipboardHistoryPersistent: Bool {
+        get { defaults.bool(forKey: Keys.clipboardHistoryPersistent) }
+        set { defaults.set(newValue, forKey: Keys.clipboardHistoryPersistent) }
+    }
 
     var autoSwitchEnabled: Bool {
         get { defaults.object(forKey: Keys.autoSwitch) as? Bool ?? true }

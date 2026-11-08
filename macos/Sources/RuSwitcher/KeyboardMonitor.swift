@@ -300,7 +300,7 @@ final class KeyboardMonitor: @unchecked Sendable {
 
     /// Сброс буфера при клике мышью — иначе backspace перепечатки сотрёт не то
     /// (курсор мог уехать в другое место).
-    fileprivate func resetBuffersOnClick() {
+    func resetInputTracking() {
         triggerArmed = false
         disarmHotkeys()
         lastTapTime = nil
@@ -658,7 +658,7 @@ private func keyboardCallback(
             return nil
         }
     } else if type == .leftMouseDown || type == .rightMouseDown {
-        monitor.resetBuffersOnClick()
+        monitor.resetInputTracking()
     }
 
     return Unmanaged.passUnretained(event)

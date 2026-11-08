@@ -12,6 +12,7 @@ final class TextConverter {
     /// Буфер реально менялся: выделение, прочитанное через AX, его не трогает, и при отказе
     /// от конверсии переписывать нечего.
     private var clipboardDirty = false
+    var hasTemporaryClipboardContents: Bool { clipboardDirty }
     private var isConverting = false
     /// Очередь для инжекта нажатий буферного движка — чтобы usleep не блокировал
     /// main-поток, на котором висит event tap (иначе тап голодает → лаги/потери нажатий).
@@ -962,6 +963,11 @@ final class TextConverter {
         for type in Self.transientTypes { pasteboard.setData(Data(), forType: type) }
         simKey(keyCode: KC.letterV, flags: .maskCommand) // Cmd+V
         usleep(150_000) // 150мс — дать приложению вставить текст и обновить курсор
+    }
+
+    func pasteFromClipboard() {
+        clearState()
+        simKey(keyCode: KC.letterV, flags: .maskCommand)
     }
 
     /// Отменяет отложенное восстановление clipboard

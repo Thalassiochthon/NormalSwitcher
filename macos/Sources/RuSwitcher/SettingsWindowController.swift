@@ -35,6 +35,9 @@ final class SettingsWindowController {
     var onRemoteDesktopChanged: ((Bool) -> Void)?
     var onCaretFlagChanged: ((Bool) -> Void)?
     var onHideIconChanged: ((Bool) -> Void)?
+    var onClipboardHistoryChanged: (() -> Void)?
+    var onClipboardHistoryPersistenceChanged: (() -> Void)?
+    private weak var clipboardHistoryPersistenceCheckbox: NSButton?
     var onFlagSizeChanged: (() -> Void)?
 
     func showWindow() {
@@ -839,8 +842,25 @@ final class SettingsWindowController {
         let item = NSTabViewItem()
         item.label = L10n.settingsTabAdvanced
 
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 595))
-        var y: CGFloat = 545
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 660))
+        var y: CGFloat = 610
+
+        let historyCheckbox = NSButton(checkboxWithTitle: L10n.clipboardHistoryEnabled,
+                                       target: self, action: #selector(clipboardHistoryChanged(_:)))
+        historyCheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 22)
+        historyCheckbox.state = SettingsManager.shared.clipboardHistoryEnabled ? .on : .off
+        view.addSubview(historyCheckbox)
+        y -= 26
+
+        let persistenceCheckbox = NSButton(checkboxWithTitle: L10n.clipboardHistoryPersistent,
+                                           target: self, action: #selector(clipboardHistoryPersistenceChanged(_:)))
+        persistenceCheckbox.frame = NSRect(x: 40, y: y, width: 400, height: 22)
+        persistenceCheckbox.state = SettingsManager.shared.clipboardHistoryPersistent ? .on : .off
+        persistenceCheckbox.isEnabled = historyCheckbox.state == .on
+        persistenceCheckbox.toolTip = L10n.clipboardHistoryPersistenceHint
+        view.addSubview(persistenceCheckbox)
+        clipboardHistoryPersistenceCheckbox = persistenceCheckbox
+        y -= 39
 
         // Бета-версии (пред-релизы) — для тестировщиков; по умолчанию ВЫКЛ.
         let betaCheckbox = NSButton(checkboxWithTitle: L10n.settingsBetaChannel,
@@ -987,8 +1007,20 @@ final class SettingsWindowController {
         view.addSubview(quitBtn)
 
         fitToText(view)
-        item.view = topAligned(view)
+        item.view = scrollableTopAligned(view, maxHeight: 640)
         return item
+    }
+
+    @objc private func clipboardHistoryChanged(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        SettingsManager.shared.clipboardHistoryEnabled = enabled
+        clipboardHistoryPersistenceCheckbox?.isEnabled = enabled
+        onClipboardHistoryChanged?()
+    }
+
+    @objc private func clipboardHistoryPersistenceChanged(_ sender: NSButton) {
+        SettingsManager.shared.clipboardHistoryPersistent = sender.state == .on
+        onClipboardHistoryPersistenceChanged?()
     }
 
     @objc private func hideIconChanged(_ sender: NSButton) {

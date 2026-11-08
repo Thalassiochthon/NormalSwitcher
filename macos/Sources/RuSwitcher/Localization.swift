@@ -49,6 +49,15 @@ enum L10n {
     static var settingsDonate: String { s("settings.donate") }
     static var settingsContact: String { s("settings.contact") }
     static var settingsDebugLog: String { s("settings.debugLog") }
+    static var clipboardHistoryTitle: String { s("clipboardHistory.title") }
+    static var clipboardHistoryEnabled: String { s("clipboardHistory.enabled") }
+    static var clipboardHistoryPersistent: String { s("clipboardHistory.persistent") }
+    static var clipboardHistoryPersistenceHint: String { s("clipboardHistory.persistenceHint") }
+    static var clipboardHistoryEmpty: String { s("clipboardHistory.empty") }
+    static var clipboardHistoryWhitespace: String { s("clipboardHistory.whitespace") }
+    static var clipboardHistoryClear: String { s("clipboardHistory.clear") }
+    static var clipboardHistoryStorageError: String { s("clipboardHistory.storageError") }
+    static var clipboardHistoryShortcutUnavailable: String { s("clipboardHistory.shortcutUnavailable") }
     static var settingsSecureNotice: String { s("settings.secureNotice") }
     static var settingsHideIcon: String { s("settings.hideIcon") }
     static var settingsHideIconHint: String { s("settings.hideIcon.hint") }
@@ -331,6 +340,15 @@ enum L10n {
             "settings.donate": "Support Development ❤️",
             "settings.contact": "Contact Developer",
             "settings.debugLog": "Debug logging",
+            "clipboardHistory.title": "Clipboard History",
+            "clipboardHistory.enabled": "Enable clipboard history (⌃⇧V)",
+            "clipboardHistory.persistent": "Keep history after restarting",
+            "clipboardHistory.persistenceHint": "Saves copied text on this Mac. Off by default.",
+            "clipboardHistory.empty": "Copy some text to start your history",
+            "clipboardHistory.whitespace": "Whitespace",
+            "clipboardHistory.clear": "Clear History",
+            "clipboardHistory.storageError": "Could not update the saved clipboard history.",
+            "clipboardHistory.shortcutUnavailable": "Could not register ⌃⇧V. Open Clipboard History from the menu bar.",
             "settings.secureNotice": "Show the Secure Input notice",
             "settings.hideIcon": "Hide the menu bar icon",
             "settings.hideIcon.hint": "To open Settings or bring the icon back, just launch RuSwitcher again (Applications or Spotlight).",
@@ -499,6 +517,15 @@ enum L10n {
             "settings.donate": "Поддержать разработку ❤️",
             "settings.contact": "Связаться с разработчиком",
             "settings.debugLog": "Режим отладки",
+            "clipboardHistory.title": "История буфера обмена",
+            "clipboardHistory.enabled": "Включить историю буфера (⌃⇧V)",
+            "clipboardHistory.persistent": "Сохранять историю после перезапуска",
+            "clipboardHistory.persistenceHint": "Хранит скопированный текст на этом Mac. По умолчанию выключено.",
+            "clipboardHistory.empty": "Скопируйте текст, чтобы добавить его в историю",
+            "clipboardHistory.whitespace": "Пробельные символы",
+            "clipboardHistory.clear": "Очистить историю",
+            "clipboardHistory.storageError": "Не удалось изменить сохранённую историю буфера.",
+            "clipboardHistory.shortcutUnavailable": "Не удалось назначить ⌃⇧V. Откройте историю буфера через строку меню.",
             "settings.secureNotice": "Показывать подсказку о защищённом вводе",
             "settings.hideIcon": "Скрывать иконку в меню-баре",
             "settings.hideIcon.hint": "Чтобы открыть настройки или вернуть иконку, просто запустите RuSwitcher ещё раз («Программы» или Spotlight).",
