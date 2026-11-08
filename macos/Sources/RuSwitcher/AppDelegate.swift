@@ -103,6 +103,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.rebuildMenu()          // синхронизировать галочку в меню
             self?.syncCaretIndicator()   // создать/снести индикатор + обновить гейт onUserInput
         }
+        settingsController.onCheckPermissions = { [weak self] in
+            self?.runPermissionWizard(interactive: true)
+        }
+        settingsController.onShare = { [weak self] button in
+            self?.buildShareSubmenu().popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: button)
+        }
         settingsController.onHideIconChanged = { [weak self] hide in
             self?.statusItem.isVisible = !hide
         }
@@ -958,93 +964,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuildMenu() {
         let menu = NSMenu()
 
-        // Строка версии (с dev-меткой для непубликуемых сборок) — чтобы было видно, какой билд.
-        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let devTag = Bundle.main.infoDictionary?["RSDevTag"] as? String ?? ""
-        let verItem = NSMenuItem(title: "NormalSwitcher \(ver)\(devTag)", action: nil, keyEquivalent: "")
-        verItem.isEnabled = false
-        menu.addItem(verItem)
-        let missingItem = NSMenuItem(title: L10n.menuPermissionsMissing, action: #selector(recheckPermissions), keyEquivalent: "")
-        missingItem.target = self
-        missingItem.tag = Self.permissionsItemTag
-        missingItem.isHidden = permissionsGranted
-        menu.addItem(missingItem)
-        menu.addItem(NSMenuItem.separator())
-
-        // Список раскладок как в системном меню ввода: флаг + имя, галочка на текущей,
-        // клик — переключение. Актуализируется в menuWillOpen при каждом открытии.
-        for item in layoutMenuItems() { menu.addItem(item) }
-        menu.addItem(NSMenuItem.separator())
-
-        let autoItem = NSMenuItem(title: L10n.menuAutoSwitch, action: #selector(toggleAutoSwitch), keyEquivalent: "")
-        autoItem.target = self
-        autoItem.state = SettingsManager.shared.autoSwitchEnabled ? .on : .off
-        menu.addItem(autoItem)
-
-        let autoConvertItem = NSMenuItem(title: L10n.menuAutoConvert, action: #selector(toggleAutoConvert), keyEquivalent: "")
-        autoConvertItem.target = self
-        autoConvertItem.state = SettingsManager.shared.autoConvert ? .on : .off
-        menu.addItem(autoConvertItem)
-
-        let keySoundItem = NSMenuItem(title: L10n.menuKeySound, action: #selector(toggleKeySound), keyEquivalent: "")
-        keySoundItem.target = self
-        keySoundItem.state = SettingsManager.shared.keySound ? .on : .off
-        menu.addItem(keySoundItem)
-
-        let caretFlagItem = NSMenuItem(title: L10n.menuCaretFlag, action: #selector(toggleCaretFlag), keyEquivalent: "")
-        caretFlagItem.target = self
-        caretFlagItem.state = SettingsManager.shared.caretFlag ? .on : .off
-        menu.addItem(caretFlagItem)
-
-        // Единый стиль меню-бара (Sequoia): монохромная плашка вместо цветного флага.
-        let monoIconItem = NSMenuItem(title: L10n.menuMonoIcon, action: #selector(toggleMonoIcon), keyEquivalent: "")
-        monoIconItem.target = self
-        monoIconItem.state = SettingsManager.shared.monochromeIcon ? .on : .off
-        menu.addItem(monoIconItem)
-
-        // Режим удалённого стола отложен в 2.5 — тумблер скрыт за флагом (для тестирования).
-        if SettingsManager.shared.showRemoteDesktopBeta {
-            let remoteDesktopItem = NSMenuItem(title: L10n.menuRemoteDesktop, action: #selector(toggleRemoteDesktop), keyEquivalent: "")
-            remoteDesktopItem.target = self
-            remoteDesktopItem.state = SettingsManager.shared.remoteDesktopMode ? .on : .off
-            menu.addItem(remoteDesktopItem)
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        let permItem = NSMenuItem(title: L10n.menuCheckPermissions, action: #selector(recheckPermissions), keyEquivalent: "")
-        permItem.target = self
-        menu.addItem(permItem)
-
-        let settingsItem = NSMenuItem(title: L10n.menuSettings, action: #selector(openSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-
         if SettingsManager.shared.clipboardHistoryEnabled {
-            let shortcut = SettingsManager.shared.clipboardHistoryShortcut.title
-            let title = L10n.clipboardHistoryTitle + (clipboardHistory.shortcutAvailable ? " (\(shortcut))" : "")
-            let historyItem = NSMenuItem(title: title, action: #selector(openClipboardHistory), keyEquivalent: "")
-            historyItem.target = self
-            menu.addItem(historyItem)
+            let history = NSMenuItem(title: L10n.clipboardHistoryTitle,
+                                     action: #selector(openClipboardHistory), keyEquivalent: "")
+            history.target = self
+            if clipboardHistory.shortcutAvailable {
+                let shortcut = SettingsManager.shared.clipboardHistoryShortcut
+                history.keyEquivalent = shortcut.menuKeyEquivalent
+                history.keyEquivalentModifierMask = shortcut.menuModifierFlags
+            }
+            menu.addItem(history)
+            menu.addItem(.separator())
         }
 
-        let updateItem = NSMenuItem(title: L10n.menuCheckUpdates, action: #selector(checkUpdates), keyEquivalent: "")
-        updateItem.target = self
-        menu.addItem(updateItem)
+        for item in layoutMenuItems() { menu.addItem(item) }
+        menu.addItem(.separator())
 
-        menu.addItem(NSMenuItem.separator())
+        let autoConvert = NSMenuItem(title: L10n.menuAutomaticCorrection,
+                                     action: #selector(toggleAutoConvert), keyEquivalent: "")
+        autoConvert.target = self
+        autoConvert.state = SettingsManager.shared.autoConvert ? .on : .off
+        menu.addItem(autoConvert)
+        menu.addItem(.separator())
 
-        let starItem = NSMenuItem(title: L10n.menuStarOnGithub, action: #selector(openGitHub), keyEquivalent: "")
-        starItem.target = self
-        menu.addItem(starItem)
+        let missing = NSMenuItem(title: L10n.menuCheckPermissions, action: #selector(recheckPermissions), keyEquivalent: "")
+        missing.target = self
+        missing.tag = Self.permissionsItemTag
+        missing.isHidden = permissionsGranted
+        menu.addItem(missing)
 
-        let shareItem = NSMenuItem(title: L10n.menuShare, action: nil, keyEquivalent: "")
-        shareItem.submenu = buildShareSubmenu()
-        menu.addItem(shareItem)
+        let settings = NSMenuItem(title: L10n.menuSettings, action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+        menu.addItem(.separator())
 
-        menu.addItem(NSMenuItem.separator())
-
-        let quitItem = NSMenuItem(title: L10n.menuQuit, action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: L10n.settingsQuit, action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -1065,8 +1019,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return LayoutSwitcher.installedLayouts().map { source in
             let id = LayoutSwitcher.sourceID(source)
             let badge = Self.regionalFlag(forLayoutID: id) ?? LayoutSwitcher.languageCode(source).map(Self.flagBadge(forLanguage:))
-            let title = [badge, LayoutSwitcher.sourceName(source)].compactMap { $0 }.joined(separator: " ")
-            let item = NSMenuItem(title: title, action: #selector(selectLayout(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: LayoutSwitcher.sourceName(source), action: #selector(selectLayout(_:)), keyEquivalent: "")
+            if let badge, !SettingsManager.shared.monochromeIcon {
+                item.image = flatFlag(for: badge, height: 12)
+            }
             item.target = self
             item.representedObject = id
             item.state = (id == currentID) ? .on : .off
@@ -1081,7 +1037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === statusItem.menu else { return }
         menu.item(withTag: Self.permissionsItemTag)?.isHidden = permissionsGranted
-        let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? 3
+        let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 2 : 0)
         for old in menu.items where old.tag == Self.layoutItemTag { menu.removeItem(old) }
         for (offset, item) in layoutMenuItems().enumerated() {
             menu.insertItem(item, at: insertAt + offset)
@@ -1105,24 +1061,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Сравниваем по флагу-идентичности, а не по title — в монохромном режиме title пуст.
         let changed = lastFlagShown != flag
         lastFlagShown = flag
-        if SettingsManager.shared.monochromeIcon {
-            statusItem.button?.title = ""
-            statusItem.button?.image = badgeImage(for: currentBadgeLabel())
-        } else {
-            statusItem.button?.image = nil
-            statusItem.button?.attributedTitle = Self.flagTitle(flag, size: SettingsManager.shared.flagSize)
-        }
+        let settings = SettingsManager.shared
+        let flagHeight = settings.flagSize == 0 ? 12 : max(10, settings.flagSize - 4)
+        statusItem.button?.title = ""
+        statusItem.button?.image = (settings.monochromeIcon ? nil : flatFlag(for: flag, height: flagHeight))
+            ?? badgeImage(for: currentBadgeLabel())
         if changed { caretIndicator?.layoutChanged() }
     }
 
-    /// Флаг-эмодзи для строки меню. Эмодзи сидит выше центра строки, и тем выше, чем крупнее
-    /// шрифт; поправки измерены по пикселям кнопки статус-айтема (флаги ru/ua/us одинаково):
-    /// системный размер −1 pt, 16 pt −2, 18 pt −2,5, 20 pt −3,5. Текстом, а не картинкой:
-    /// цветной эмодзи и Retina остаются за системой.
-    static func flagTitle(_ flag: String, size: Int) -> NSAttributedString {
-        let offsets: [Int: CGFloat] = [0: -1, 16: -2, 18: -2.5, 20: -3.5]
-        let font = size > 0 ? NSFont.systemFont(ofSize: CGFloat(size)) : NSFont.menuBarFont(ofSize: 0)
-        return NSAttributedString(string: flag, attributes: [.font: font, .baselineOffset: offsets[size] ?? 0])
+    private func flatFlag(for flag: String, height: Int) -> NSImage? {
+        guard flag == "🇷🇺" || flag == "🇺🇸" else { return nil }
+        let cacheKey = "\(flag)-\(height)"
+        if let image = badgeCache[cacheKey] { return image }
+
+        let size = NSSize(width: (CGFloat(height) * 1.5).rounded(), height: CGFloat(height))
+        let image = NSImage(size: size, flipped: false) { rect in
+            let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 1.5, yRadius: 1.5)
+            NSGraphicsContext.saveGraphicsState()
+            outline.addClip()
+            NSColor.white.setFill()
+            rect.fill()
+            if flag == "🇷🇺" {
+                let band = rect.height / 3
+                NSColor(srgbRed: 0.10, green: 0.34, blue: 0.73, alpha: 1).setFill()
+                NSRect(x: 0, y: band, width: rect.width, height: band).fill()
+                NSColor(srgbRed: 0.82, green: 0.15, blue: 0.20, alpha: 1).setFill()
+                NSRect(x: 0, y: 0, width: rect.width, height: band).fill()
+            } else {
+                let band = rect.height / 13
+                NSColor(srgbRed: 0.73, green: 0.16, blue: 0.23, alpha: 1).setFill()
+                for index in stride(from: 0, to: 13, by: 2) {
+                    NSRect(x: 0, y: CGFloat(index) * band, width: rect.width, height: band).fill()
+                }
+                let canton = NSRect(x: 0, y: 6 * band, width: rect.width * 0.42, height: 7 * band)
+                NSColor(srgbRed: 0.19, green: 0.24, blue: 0.43, alpha: 1).setFill()
+                canton.fill()
+                NSColor.white.setFill()
+                // Simplified stars remain distinct at menu-bar sizes.
+                for row in 0..<3 {
+                    for column in 0..<4 {
+                        let point = NSPoint(x: canton.width * CGFloat(column + 1) / 5,
+                                            y: canton.minY + canton.height * CGFloat(row + 1) / 4)
+                        NSBezierPath(ovalIn: NSRect(x: point.x - 0.35, y: point.y - 0.35,
+                                                   width: 0.7, height: 0.7)).fill()
+                    }
+                }
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            NSColor.labelColor.withAlphaComponent(0.23).setStroke()
+            outline.lineWidth = 0.5
+            outline.stroke()
+            return true
+        }
+        badgeCache[cacheKey] = image
+        return image
     }
 
     /// Подпись монохромной плашки — родная аббревиатура языка, как у системного индикатора.
@@ -1226,44 +1218,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Actions
 
-    @objc private func toggleAutoSwitch(_ sender: NSMenuItem) {
-        SettingsManager.shared.autoSwitchEnabled.toggle()
-        let enabled = SettingsManager.shared.autoSwitchEnabled
-        sender.state = enabled ? .on : .off
-        settingsController.updateAutoSwitchState(enabled)
-    }
-
     @objc private func toggleAutoConvert(_ sender: NSMenuItem) {
         SettingsManager.shared.autoConvert.toggle()
         sender.state = SettingsManager.shared.autoConvert ? .on : .off
         settingsController.updateAutoConvertState(SettingsManager.shared.autoConvert)   // #4
         if SettingsManager.shared.autoConvert { offerFrequencyPacksIfNeeded() }
-    }
-
-    @objc private func toggleKeySound(_ sender: NSMenuItem) {
-        SettingsManager.shared.keySound.toggle()
-        sender.state = SettingsManager.shared.keySound ? .on : .off
-    }
-
-    @objc private func toggleCaretFlag(_ sender: NSMenuItem) {
-        SettingsManager.shared.caretFlag.toggle()
-        sender.state = SettingsManager.shared.caretFlag ? .on : .off
-        settingsController.updateCaretFlagState(SettingsManager.shared.caretFlag)
-        syncCaretIndicator()   // создать/снести индикатор и обновить гейт onUserInput
-    }
-
-    @objc private func toggleMonoIcon(_ sender: NSMenuItem) {
-        SettingsManager.shared.monochromeIcon.toggle()
-        settingsController.refreshFlagSizeState()
-        sender.state = SettingsManager.shared.monochromeIcon ? .on : .off
-        updateStatusIcon()   // перерисовать в новом стиле сразу
-    }
-
-    @objc private func toggleRemoteDesktop(_ sender: NSMenuItem) {
-        SettingsManager.shared.remoteDesktopMode.toggle()
-        sender.state = SettingsManager.shared.remoteDesktopMode ? .on : .off
-        settingsController.updateRemoteDesktopState(SettingsManager.shared.remoteDesktopMode)   // #5
-        reconfigureTap()  // уровень event tap зависит от режима
     }
 
     /// Пересоздаёт event tap и, если создание не удалось (например, session-tap отклонён),
@@ -1286,16 +1245,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openClipboardHistory() {
         DispatchQueue.main.async { [weak self] in self?.clipboardHistory.show() }
-    }
-
-    @objc private func checkUpdates() {
-        UpdateChecker.checkNow()
-    }
-
-    @objc private func openGitHub() {
-        if let url = URL(string: SettingsManager.githubURL) {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     /// Окно «Что нового» — один раз после обновления, на языке приложения.

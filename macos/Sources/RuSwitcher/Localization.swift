@@ -27,6 +27,7 @@ enum L10n {
     static var settingsTitle: String { s("settings.title") }
     static var settingsTabGeneral: String { s("settings.tab.general") }
     static var settingsTabAbout: String { s("settings.tab.about") }
+    static var settingsTabClipboard: String { s("settings.tab.clipboard") }
     static var settingsTabAdvanced: String { s("settings.tab.advanced") }
     static var settingsAutoSwitch: String { s("settings.autoSwitch") }
     static var settingsLaunchAtLogin: String { s("settings.launchAtLogin") }
@@ -109,7 +110,13 @@ enum L10n {
     static var settingsTriggerRightOnly: String { s("settings.triggerRightOnly") }
     static var settingsTriggerDoubleTap: String { s("settings.triggerDoubleTap") }
     static var settingsTriggerHint: String { s("settings.triggerHint") }
-    static var menuAutoConvert: String { s("menu.autoConvert") }
+    static var menuAutomaticCorrection: String {
+        switch languageCode {
+        case "ru": "Исправлять раскладку автоматически"
+        case "en": "Correct Layout Automatically"
+        default: s("menu.autoConvert")
+        }
+    }
     static var menuKeySound: String { s("menu.keySound") }
     static var menuRemoteDesktop: String { s("menu.remoteDesktop") }
     static var menuCaretFlag: String { s("menu.caretFlag") }
@@ -289,6 +296,7 @@ enum L10n {
             "onboard.autoConvert.title": "Automatic layout conversion",
             "onboard.autoConvert.text": "NormalSwitcher can fix the keyboard layout automatically as you type. It's off by default. The manual trigger (Option) always works and undoes a fix. Enable automatic conversion now?",
             "settings.tab.exceptions": "Auto-conversion",
+            "settings.tab.clipboard": "Clipboard",
             "settings.remoteDesktop.hint": "For Apple Screen Sharing: run NormalSwitcher on the remote Mac too and enable this on both.",
             "settings.exceptions.apps": "Don’t auto-convert in these apps",
             "settings.exceptions.never": "Never convert these words",
@@ -464,6 +472,7 @@ enum L10n {
             "onboard.autoConvert.title": "Автоматическая конверсия раскладки",
             "onboard.autoConvert.text": "NormalSwitcher может исправлять раскладку автоматически по ходу набора. По умолчанию выключено. Ручной триггер (Option) всегда работает — им же отменяется замена. Включить автоматическую конверсию сейчас?",
             "settings.tab.exceptions": "Автоконверсия",
+            "settings.tab.clipboard": "Буфер обмена",
             "settings.remoteDesktop.hint": "Для Apple Screen Sharing: запустите NormalSwitcher и на удалённом Mac, включив этот режим на обоих.",
             "settings.exceptions.apps": "Не конвертировать в этих приложениях",
             "settings.exceptions.never": "Никогда не конвертировать эти слова",

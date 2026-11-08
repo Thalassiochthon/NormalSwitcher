@@ -15,6 +15,19 @@ struct ClipboardHistoryShortcut: Codable, Equatable {
             .joined() + key
     }
 
+    private static let modifierMapping: [(NSEvent.ModifierFlags, UInt32)] = [
+        (.control, UInt32(controlKey)), (.option, UInt32(optionKey)),
+        (.shift, UInt32(shiftKey)), (.command, UInt32(cmdKey)),
+    ]
+
+    var menuKeyEquivalent: String { key == "Space" ? " " : key.lowercased() }
+
+    var menuModifierFlags: NSEvent.ModifierFlags {
+        Self.modifierMapping.reduce(into: []) { flags, entry in
+            if modifiers & entry.1 != 0 { flags.insert(entry.0) }
+        }
+    }
+
     init?(keyCode: UInt16, flags: NSEvent.ModifierFlags, characters: String?) {
         guard flags.contains(.control) || flags.contains(.option) || flags.contains(.command),
               let key = characters,
@@ -22,12 +35,8 @@ struct ClipboardHistoryShortcut: Codable, Equatable {
               let scalar = key.unicodeScalars.first,
               !CharacterSet.controlCharacters.contains(scalar),
               !(0xF700...0xF8FF).contains(scalar.value) else { return nil }
-        let mapping: [(NSEvent.ModifierFlags, UInt32)] = [
-            (.control, UInt32(controlKey)), (.option, UInt32(optionKey)),
-            (.shift, UInt32(shiftKey)), (.command, UInt32(cmdKey)),
-        ]
         self.init(keyCode: UInt32(keyCode),
-                  modifiers: mapping.reduce(0) { $0 | (flags.contains($1.0) ? $1.1 : 0) },
+                  modifiers: Self.modifierMapping.reduce(0) { $0 | (flags.contains($1.0) ? $1.1 : 0) },
                   key: scalar == " " ? "Space" : key.uppercased())
     }
 

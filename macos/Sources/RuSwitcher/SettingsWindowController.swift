@@ -5,13 +5,10 @@ import Carbon
 @MainActor
 final class SettingsWindowController {
     private var window: NSWindow?
-    private var autoSwitchCheckbox: NSButton?
     private var launchAtLoginCheckbox: NSButton?
     private var checkUpdatesCheckbox: NSButton?
     private var debugLogCheckbox: NSButton?
-    private var caretFlagCheckbox: NSButton?
     private var autoConvertCheckbox: NSButton?      // #4: синк тумблера меню → окно настроек
-    private var remoteDesktopCheckbox: NSButton?    // #5: то же (опционален — за фичефлагом)
     private var layout1Popup: NSPopUpButton?
     private var layout2Popup: NSPopUpButton?
     private var languagePopup: NSPopUpButton?
@@ -40,6 +37,8 @@ final class SettingsWindowController {
     var onClipboardHistoryShortcutChanged: ((ClipboardHistoryShortcut) -> Bool)?
     private weak var clipboardHistoryPersistenceCheckbox: NSButton?
     var onFlagSizeChanged: (() -> Void)?
+    var onCheckPermissions: (() -> Void)?
+    var onShare: ((NSButton) -> Void)?
 
     func showWindow() {
         if let window {
@@ -48,36 +47,37 @@ final class SettingsWindowController {
             return
         }
 
-        let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 752),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
+        let tabs = NSTabViewController()
+        tabs.tabStyle = .toolbar
+        tabs.transitionOptions = []
+        let sections = [
+            (createGeneralTab(), "gearshape"),
+            (createHotkeysTab(), "keyboard"),
+            (createExceptionsTab(), "character.bubble"),
+            (createClipboardTab(), "clipboard"),
+            (createAdvancedTab(), "slider.horizontal.3"),
+            (createAboutTab(), "info.circle"),
+        ]
+        var tallest: CGFloat = 0
+        for (section, symbol) in sections {
+            guard let content = section.view else { continue }
+            tallest = max(tallest, content.frame.height)
+            let controller = NSViewController()
+            controller.view = content
+            let item = NSTabViewItem(viewController: controller)
+            item.identifier = symbol
+            item.label = section.label
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: section.label)
+            tabs.addTabViewItem(item)
+        }
+
+        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+        let win = NSWindow(contentViewController: tabs)
+        win.styleMask = [.titled, .closable]
         win.title = L10n.settingsTitle
-        win.center()
+        win.toolbarStyle = .preference
         win.isReleasedWhenClosed = false
-
-        let tabView = NSTabView(frame: win.contentView!.bounds)
-        tabView.autoresizingMask = [.width, .height]
-
-        tabView.addTabViewItem(createGeneralTab())
-        tabView.addTabViewItem(createHotkeysTab())      // 3.5: все хоткеи на одной вкладке
-        tabView.addTabViewItem(createAdvancedTab())     // «Расширенные» — сразу после «Основных»
-        tabView.addTabViewItem(createExceptionsTab())
-        tabView.addTabViewItem(createAboutTab())
-
-        win.contentView = tabView
-        // Вкладок пять, и на многих языках названия в 480 pt не влезали (#45).
-        tabView.allowsTruncatedLabels = false
-        let width = max(480, ceil(tabView.minimumSize.width) + 8)
-        // Высота окна — по самой высокой вкладке (после fitToText вкладки разной высоты на разных
-        // языках). Не выше экрана: на маленьком экране низ самой длинной вкладки уйдёт под край.
-        let chrome = tabView.bounds.height - tabView.contentRect.height
-        let tallest = tabView.tabViewItems.compactMap { $0.view?.subviews.first?.frame.height }.max() ?? 700
-        var height = tallest + chrome
-        if let screen = NSScreen.main { height = min(height, screen.visibleFrame.height - 60) }
-        win.setContentSize(NSSize(width: width, height: height))
+        win.setContentSize(NSSize(width: 660, height: min(tallest, screenHeight - 120)))
         win.center()
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -85,22 +85,8 @@ final class SettingsWindowController {
         window = win
     }
 
-    /// Обновить состояние чекбокса автопереключения извне
-    func updateAutoSwitchState(_ enabled: Bool) {
-        autoSwitchCheckbox?.state = enabled ? .on : .off
-    }
-
-    /// Обновить чекбокс «флаг у курсора» извне (когда переключили из меню)
-    func updateCaretFlagState(_ enabled: Bool) {
-        caretFlagCheckbox?.state = enabled ? .on : .off
-    }
-
-    /// #4/#5: синхронизировать чекбоксы с переключением из меню-бара.
     func updateAutoConvertState(_ enabled: Bool) {
         autoConvertCheckbox?.state = enabled ? .on : .off
-    }
-    func updateRemoteDesktopState(_ enabled: Bool) {
-        remoteDesktopCheckbox?.state = enabled ? .on : .off
     }
 
     // MARK: - General Tab
@@ -296,7 +282,6 @@ final class SettingsWindowController {
         autoSwitch.frame = NSRect(x: 20, y: y, width: 420, height: 22)
         autoSwitch.state = SettingsManager.shared.autoSwitchEnabled ? .on : .off
         view.addSubview(autoSwitch)
-        autoSwitchCheckbox = autoSwitch
         y -= 30
 
         // Запуск при логине
@@ -682,7 +667,6 @@ final class SettingsWindowController {
         caretFlag.frame = NSRect(x: 20, y: y - 22, width: 420, height: 22)
         caretFlag.state = SettingsManager.shared.caretFlag ? .on : .off
         view.addSubview(caretFlag)
-        caretFlagCheckbox = caretFlag
         y -= 24
         let cfHint = NSTextField(wrappingLabelWithString: L10n.settingsCaretFlagHint)
         cfHint.frame = NSRect(x: 40, y: y - 44, width: 400, height: 44)
@@ -696,7 +680,6 @@ final class SettingsWindowController {
             remote.frame = NSRect(x: 20, y: y - 22, width: 420, height: 22)
             remote.state = SettingsManager.shared.remoteDesktopMode ? .on : .off
             view.addSubview(remote)
-            remoteDesktopCheckbox = remote
             y -= 24
             let rHint = NSTextField(wrappingLabelWithString: L10n.settingsRemoteDesktopHint)
             rHint.frame = NSRect(x: 40, y: y - 44, width: 400, height: 44)
@@ -819,19 +802,23 @@ final class SettingsWindowController {
         updateBtn.bezelStyle = .rounded
         view.addSubview(updateBtn)
 
+        let shareButton = NSButton(title: L10n.menuShare, target: self, action: #selector(shareApp(_:)))
+        shareButton.frame = NSRect(x: 230, y: y, width: 210, height: 32)
+        shareButton.bezelStyle = .rounded
+        view.addSubview(shareButton)
+
         fitToText(view)
         item.view = topAligned(view)
         return item
     }
 
-    // MARK: - Advanced Tab
+    // MARK: - Clipboard Tab
 
-    private func createAdvancedTab() -> NSTabViewItem {
+    private func createClipboardTab() -> NSTabViewItem {
         let item = NSTabViewItem()
-        item.label = L10n.settingsTabAdvanced
-
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 692))
-        var y: CGFloat = 642
+        item.label = L10n.settingsTabClipboard
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 160))
+        var y: CGFloat = 112
 
         let historyCheckbox = NSButton(checkboxWithTitle: L10n.clipboardHistoryEnabled,
                                        target: self, action: #selector(clipboardHistoryChanged(_:)))
@@ -855,7 +842,20 @@ final class SettingsWindowController {
         persistenceCheckbox.toolTip = L10n.clipboardHistoryPersistenceHint
         view.addSubview(persistenceCheckbox)
         clipboardHistoryPersistenceCheckbox = persistenceCheckbox
-        y -= 39
+
+        fitToText(view)
+        item.view = topAligned(view)
+        return item
+    }
+
+    // MARK: - Advanced Tab
+
+    private func createAdvancedTab() -> NSTabViewItem {
+        let item = NSTabViewItem()
+        item.label = L10n.settingsTabAdvanced
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 692))
+        var y: CGFloat = 642
 
         // Бета-версии (пред-релизы) — для тестировщиков; по умолчанию ВЫКЛ.
         let betaCheckbox = NSButton(checkboxWithTitle: L10n.settingsBetaChannel,
@@ -946,6 +946,20 @@ final class SettingsWindowController {
         view.addSubview(hideIconHint)
         y -= 47
 
+        let soundCheckbox = NSButton(checkboxWithTitle: L10n.menuKeySound,
+                                     target: self, action: #selector(layoutSoundChanged(_:)))
+        soundCheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 22)
+        soundCheckbox.state = SettingsManager.shared.keySound ? .on : .off
+        view.addSubview(soundCheckbox)
+        y -= 30
+
+        let monochromeCheckbox = NSButton(checkboxWithTitle: L10n.menuMonoIcon,
+                                          target: self, action: #selector(monochromeIconChanged(_:)))
+        monochromeCheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 22)
+        monochromeCheckbox.state = SettingsManager.shared.monochromeIcon ? .on : .off
+        view.addSubview(monochromeCheckbox)
+        y -= 30
+
         // Размер флага в меню-баре (идея из форка landco-debug). Для монохромной плашки не нужен.
         let flagLabel = NSTextField(labelWithString: L10n.settingsFlagSize)
         flagLabel.frame = NSRect(x: 20, y: y, width: 150, height: 22)
@@ -1000,6 +1014,12 @@ final class SettingsWindowController {
         quitBtn.frame = NSRect(x: 20, y: y, width: 200, height: 32)
         quitBtn.bezelStyle = .rounded
         view.addSubview(quitBtn)
+
+        let permissionsButton = NSButton(title: L10n.menuCheckPermissions,
+                                         target: self, action: #selector(checkPermissions))
+        permissionsButton.frame = NSRect(x: 230, y: y, width: 210, height: 32)
+        permissionsButton.bezelStyle = .rounded
+        view.addSubview(permissionsButton)
 
         fitToText(view)
         item.view = scrollableTopAligned(view, maxHeight: 640)
@@ -1078,9 +1098,23 @@ final class SettingsWindowController {
         onHideIconChanged?(hide)
     }
 
-    /// Монохромную плашку переключают и из меню, а окно настроек живёт всю сессию.
-    func refreshFlagSizeState() {
-        flagSizePopup?.isEnabled = !SettingsManager.shared.monochromeIcon
+    @objc private func layoutSoundChanged(_ sender: NSButton) {
+        SettingsManager.shared.keySound = sender.state == .on
+    }
+
+    @objc private func monochromeIconChanged(_ sender: NSButton) {
+        let monochrome = sender.state == .on
+        SettingsManager.shared.monochromeIcon = monochrome
+        flagSizePopup?.isEnabled = !monochrome
+        onFlagSizeChanged?()
+    }
+
+    @objc private func checkPermissions() {
+        onCheckPermissions?()
+    }
+
+    @objc private func shareApp(_ sender: NSButton) {
+        onShare?(sender)
     }
 
     @objc private func flagSizeChanged(_ sender: NSPopUpButton) {
