@@ -13,7 +13,6 @@ enum UpdateChecker {
     /// Структура JSON версии
     private struct VersionInfo: Decodable {
         let version: String
-        let url: String
         let notes: String?
         let sha256: String?
     }
@@ -120,7 +119,7 @@ enum UpdateChecker {
         case .alertFirstButtonReturn:
             await installAndRestart(info: info)
         case .alertSecondButtonReturn:
-            if let url = URL(string: info.url) {
+            if let url = SettingsManager.releasesURL {
                 NSWorkspace.shared.open(url)
             }
         case .alertThirdButtonReturn:
@@ -152,8 +151,7 @@ enum UpdateChecker {
         guard let expectedSHA = info.sha256, !expectedSHA.isEmpty else {
             rslog("Update: no sha256 in version.json — falling back to browser download")
             // URL строим локально, а не из фида: фиду установщик не доверяет нигде.
-            // Страница скачивания сайта: там зеркало, если GitHub недоступен.
-            if let url = SettingsManager.websiteLink("download", medium: "updater") {
+            if let url = SettingsManager.releasesURL {
                 NSWorkspace.shared.open(url)
             }
             return
@@ -388,9 +386,8 @@ enum UpdateChecker {
         alert.addButton(withTitle: L10n.updateLater)
         // URL строим локально из константы, а НЕ из info.url: фид приходит по сети,
         // и остальной установщик ему сознательно не доверяет (ревью-находка).
-        // Сайт, а не GitHub: скачивание чаще всего срывается как раз из-за недоступного GitHub.
         if alert.runModal() == .alertFirstButtonReturn,
-           let url = SettingsManager.websiteLink("download", medium: "updater") {
+           let url = SettingsManager.releasesURL {
             NSWorkspace.shared.open(url)
         }
     }

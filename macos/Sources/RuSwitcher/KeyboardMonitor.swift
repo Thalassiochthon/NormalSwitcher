@@ -10,14 +10,18 @@ let kRuSwitcherEventMarker: Int64 = 0x52555300
 /// для каждого нажатия при включённом debug).
 private let rsLogQueue = DispatchQueue(label: "com.ruswitcher.log")
 
+let debugLogURL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    .appendingPathComponent("Library/Logs/NormalSwitcher", isDirectory: true)
+    .appendingPathComponent("normalswitcher.log")
+
 func rslog(_ msg: String) {
     // Thread-safe: читаем UserDefaults напрямую (без MainActor)
     guard UserDefaults.standard.bool(forKey: "com.ruswitcher.debugLog") else { return }
 
     let line = "\(Date()): \(msg)\n"
     rsLogQueue.async {
-        let logDir = NSHomeDirectory() + "/Library/Logs/RuSwitcher"
-        let path = logDir + "/ruswitcher.log"
+        let logDir = debugLogURL.deletingLastPathComponent().path
+        let path = debugLogURL.path
 
         // Создаём директорию если нет
         if !FileManager.default.fileExists(atPath: logDir) {

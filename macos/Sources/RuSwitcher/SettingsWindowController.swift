@@ -813,19 +813,6 @@ final class SettingsWindowController {
         view.addSubview(starBtn)
         y -= 40
 
-        // Кнопка доната
-        let donateBtn = NSButton(title: L10n.settingsDonate, target: self, action: #selector(openDonate))
-        donateBtn.frame = NSRect(x: 20, y: y, width: 200, height: 32)
-        donateBtn.bezelStyle = .rounded
-        view.addSubview(donateBtn)
-
-        // Кнопка контакта
-        let contactBtn = NSButton(title: L10n.settingsContact, target: self, action: #selector(openContact))
-        contactBtn.frame = NSRect(x: 230, y: y, width: 200, height: 32)
-        contactBtn.bezelStyle = .rounded
-        view.addSubview(contactBtn)
-        y -= 40
-
         // Проверить обновления
         let updateBtn = NSButton(title: L10n.menuCheckUpdates, target: self, action: #selector(checkUpdates))
         updateBtn.frame = NSRect(x: 20, y: y, width: 200, height: 32)
@@ -998,7 +985,7 @@ final class SettingsWindowController {
         y -= 50
 
         // Путь к логу
-        let logPath = logFilePath()
+        let logPath = debugLogURL.path
         let pathLabel = NSTextField(wrappingLabelWithString: logPath)
         pathLabel.frame = NSRect(x: 20, y: y - 20, width: 420, height: 40)
         pathLabel.font = .systemFont(ofSize: 10)
@@ -1321,26 +1308,12 @@ final class SettingsWindowController {
         }
     }
 
-    @objc private func openDonate() {
-        if let url = URL(string: SettingsManager.shared.donateURL) {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    @objc private func openContact() {
-        let email = SettingsManager.shared.contactEmail
-        let subject = "NormalSwitcher Feedback"
-        if let url = URL(string: "mailto:\(email)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
     @objc private func checkUpdates() {
         UpdateChecker.checkNow()
     }
 
     @objc private func showLogFile() {
-        let path = logFilePath()
+        let path = debugLogURL.path
         if FileManager.default.fileExists(atPath: path) {
             NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
         } else {
@@ -1352,7 +1325,7 @@ final class SettingsWindowController {
     }
 
     @objc private func sendLogFile() {
-        let path = logFilePath()
+        let path = debugLogURL.path
         guard FileManager.default.fileExists(atPath: path) else {
             showLogFile() // покажет алерт
             return
@@ -1370,10 +1343,7 @@ final class SettingsWindowController {
         }
     }
 
-    private func logFilePath() -> String {
-        let logDir = NSHomeDirectory() + "/Library/Logs/RuSwitcher"
-        return logDir + "/ruswitcher.log"
-    }
+
 }
 
 /// Перевёрнутые координаты: документ прокрутки начинается сверху (3.5.0b).
