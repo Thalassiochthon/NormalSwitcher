@@ -16,12 +16,14 @@ cd NormalSwitcher
 
 ### История буфера обмена / Clipboard History
 
-Включается в «Настройки → Расширенные». Нажмите **Ctrl+Shift+V**, выберите
-запись стрелками и нажмите Enter. История хранит до 30 текстовых записей.
+Включается в «Настройки → Расширенные». Нажмите **Ctrl+Shift+V**, затем
+кликните по записи, чтобы сразу вставить её. Можно также выбрать запись
+стрелками и нажать Enter. История хранит до 30 текстовых записей.
 Сочетание можно записать в том же разделе настроек. Опция «Сохранять историю после перезапуска» сохраняет записи на этом Mac.
 
-Enable it in **Settings → Advanced**. Press **Ctrl+Shift+V**, select an item
-with the arrow keys, and press Enter. The history holds up to 30 text entries.
+Enable it in **Settings → Advanced**. Press **Ctrl+Shift+V**, then click an
+entry to paste it immediately. You can also select an entry with the arrow
+keys and press Enter. The history holds up to 30 text entries.
 You can record a different shortcut in the same settings tab. Enable **Keep history after restarting** to save entries on this Mac.
 
 ## RuSwitcher
