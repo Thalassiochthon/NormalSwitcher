@@ -11,6 +11,7 @@ final class SettingsManager: @unchecked Sendable {
     private enum Keys {
         static let clipboardHistoryEnabled = "com.antonjas.normalswitcher.clipboardHistory.enabled"
         static let clipboardHistoryPersistent = "com.antonjas.normalswitcher.clipboardHistory.persistent"
+        static let clipboardHistoryShortcut = "com.antonjas.normalswitcher.clipboardHistory.shortcut"
         static let autoSwitch = "com.ruswitcher.autoSwitch"
         static let layout1ID = "com.ruswitcher.layout1ID"
         static let layout2ID = "com.ruswitcher.layout2ID"
@@ -109,6 +110,21 @@ final class SettingsManager: @unchecked Sendable {
     var clipboardHistoryPersistent: Bool {
         get { defaults.bool(forKey: Keys.clipboardHistoryPersistent) }
         set { defaults.set(newValue, forKey: Keys.clipboardHistoryPersistent) }
+    }
+
+    var clipboardHistoryShortcut: ClipboardHistoryShortcut {
+        get {
+            guard let data = defaults.data(forKey: Keys.clipboardHistoryShortcut),
+                  let shortcut = try? JSONDecoder().decode(ClipboardHistoryShortcut.self, from: data) else {
+                return .standard
+            }
+            return shortcut
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Keys.clipboardHistoryShortcut)
+            }
+        }
     }
 
     var autoSwitchEnabled: Bool {

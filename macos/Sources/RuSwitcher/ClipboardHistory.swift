@@ -2,6 +2,42 @@ import AppKit
 import ApplicationServices
 import Carbon
 
+struct ClipboardHistoryShortcut: Codable, Equatable {
+    static let standard = Self(keyCode: UInt32(KC.letterV), modifiers: UInt32(controlKey | shiftKey), key: "V")
+
+    let keyCode: UInt32
+    let modifiers: UInt32
+    let key: String
+
+    var title: String {
+        let symbols = [(controlKey, "⌃"), (optionKey, "⌥"), (shiftKey, "⇧"), (cmdKey, "⌘")]
+        return symbols.compactMap { mask, symbol in modifiers & UInt32(mask) != 0 ? symbol : nil }
+            .joined() + key
+    }
+
+    init?(keyCode: UInt16, flags: NSEvent.ModifierFlags, characters: String?) {
+        guard flags.contains(.control) || flags.contains(.option) || flags.contains(.command),
+              let key = characters,
+              key.count == 1,
+              let scalar = key.unicodeScalars.first,
+              !CharacterSet.controlCharacters.contains(scalar),
+              !(0xF700...0xF8FF).contains(scalar.value) else { return nil }
+        let mapping: [(NSEvent.ModifierFlags, UInt32)] = [
+            (.control, UInt32(controlKey)), (.option, UInt32(optionKey)),
+            (.shift, UInt32(shiftKey)), (.command, UInt32(cmdKey)),
+        ]
+        self.init(keyCode: UInt32(keyCode),
+                  modifiers: mapping.reduce(0) { $0 | (flags.contains($1.0) ? $1.1 : 0) },
+                  key: scalar == " " ? "Space" : key.uppercased())
+    }
+
+    private init(keyCode: UInt32, modifiers: UInt32, key: String) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+        self.key = key
+    }
+}
+
 @MainActor
 final class ClipboardHistory {
     private static let limit = 30
@@ -43,7 +79,7 @@ final class ClipboardHistory {
             }
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
-            registerShortcut()
+            _ = registerShortcut(settings.clipboardHistoryShortcut)
             return true
         } else {
             stop()
@@ -73,7 +109,8 @@ final class ClipboardHistory {
         let observedCount = pasteboard.changeCount
         guard observedCount != changeCount else { return }
         changeCount = observedCount
-        guard !converter.hasTemporaryClipboardContents, !AutoSwitchPolicy.secureInputActive,
+        // Secure Input applies to key monitoring, not an explicit copy to the pasteboard.
+        guard !converter.hasTemporaryClipboardContents,
               let items = pasteboard.pasteboardItems, items.count == 1,
               let item = items.first,
               Self.ignoredTypes.allSatisfy({ !item.types.contains($0) }),
@@ -89,12 +126,18 @@ final class ClipboardHistory {
     }
 
     func show() {
-        guard SettingsManager.shared.clipboardHistoryEnabled, !menuOpen else { return }
+        guard SettingsManager.shared.clipboardHistoryEnabled, !menuOpen, NSApp.modalWindow == nil else { return }
         capture()
         let target = NSWorkspace.shared.frontmostApplication
         let menu = NSMenu(title: L10n.clipboardHistoryTitle)
         if entries.isEmpty {
-            menu.addItem(withTitle: L10n.clipboardHistoryEmpty, action: nil, keyEquivalent: "")
+            let message: String
+            if #available(macOS 15.4, *), pasteboard.accessBehavior == .alwaysDeny {
+                message = L10n.clipboardHistoryAccessDenied
+            } else {
+                message = L10n.clipboardHistoryEmpty
+            }
+            menu.addItem(withTitle: message, action: nil, keyEquivalent: "")
         } else {
             for text in entries {
                 let line = text.prefix(80).split(whereSeparator: \.isWhitespace).joined(separator: " ")
@@ -141,16 +184,38 @@ final class ClipboardHistory {
         guard pasteboard.setString(text, forType: .string) else { return }
         // Leave the selected entry on the pasteboard even if focus or permissions changed.
         guard let target, NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier,
-              AXIsProcessTrusted(), !AutoSwitchPolicy.secureInputActive else { return }
+              AXIsProcessTrusted() else { return }
         keyboardMonitor.resetInputTracking()
         converter.pasteFromClipboard()
     }
 
-    private func registerShortcut() {
+    func changeShortcut(_ shortcut: ClipboardHistoryShortcut) -> Bool {
+        let settings = SettingsManager.shared
+        let previous = settings.clipboardHistoryShortcut
+        if timer != nil {
+            if shortcut == previous, shortcutAvailable { return true }
+            if let hotkey { UnregisterEventHotKey(hotkey) }
+            hotkey = nil
+            guard registerShortcut(shortcut) else {
+                _ = registerShortcut(previous)
+                return false
+            }
+        }
+        settings.clipboardHistoryShortcut = shortcut
+        return true
+    }
+
+    private func registerShortcut(_ shortcut: ClipboardHistoryShortcut) -> Bool {
+        guard handler != nil || installShortcutHandler() else { return false }
+        return RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, Self.shortcutID,
+                                   GetApplicationEventTarget(), UInt32(kEventHotKeyExclusive), &hotkey) == noErr
+    }
+
+    private func installShortcutHandler() -> Bool {
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                   eventKind: UInt32(kEventHotKeyReleased))
         let target = GetApplicationEventTarget()
-        let installed = InstallEventHandler(target, { _, event, context in
+        return InstallEventHandler(target, { _, event, context in
             guard let event, let context else { return OSStatus(eventNotHandledErr) }
             var id = EventHotKeyID()
             let status = GetEventParameter(event, EventParamName(kEventParamDirectObject),
@@ -163,14 +228,7 @@ final class ClipboardHistory {
                 DispatchQueue.main.async { history.show() }
                 return noErr
             }
-        }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler)
-        guard installed == noErr else { return }
-        let registered = RegisterEventHotKey(UInt32(KC.letterV), UInt32(controlKey | shiftKey),
-                                             Self.shortcutID, target, UInt32(kEventHotKeyExclusive), &hotkey)
-        if registered != noErr, let handler {
-            RemoveEventHandler(handler)
-            self.handler = nil
-        }
+        }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler) == noErr
     }
 
     private var storageURL: URL {

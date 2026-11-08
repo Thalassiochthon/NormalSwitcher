@@ -9,7 +9,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>NormalSwitcher</string>
 	<key>CFBundleExecutable</key>
-	<string>RuSwitcher</string>
+	<string>NormalSwitcher</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.antonjas.normalswitcher</string>
 	<key>CFBundleInfoDictionaryVersion</key>

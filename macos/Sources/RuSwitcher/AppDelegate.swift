@@ -121,6 +121,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self, !self.clipboardHistory.updatePersistence() else { return }
             self.clipboardHistory.showStorageError()
         }
+        settingsController.onClipboardHistoryShortcutChanged = { [weak self] shortcut in
+            guard let self else { return false }
+            let changed = self.clipboardHistory.changeShortcut(shortcut)
+            self.rebuildMenu()
+            return changed
+        }
     }
 
     /// Повторный запуск приложения (двойной клик в «Программах», Spotlight, Launchpad) —
@@ -1096,7 +1102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(settingsItem)
 
         if SettingsManager.shared.clipboardHistoryEnabled {
-            let title = L10n.clipboardHistoryTitle + (clipboardHistory.shortcutAvailable ? " (⌃⇧V)" : "")
+            let shortcut = SettingsManager.shared.clipboardHistoryShortcut.title
+            let title = L10n.clipboardHistoryTitle + (clipboardHistory.shortcutAvailable ? " (\(shortcut))" : "")
             let historyItem = NSMenuItem(title: title, action: #selector(openClipboardHistory), keyEquivalent: "")
             historyItem.target = self
             menu.addItem(historyItem)
@@ -1496,7 +1503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ("WhatsApp", "whatsapp", "https://wa.me/",                          [("text", "\(text) \(link("whatsapp"))")]),
             ("Facebook", "facebook", "https://www.facebook.com/sharer/sharer.php", [("u", link("facebook"))]),
             ("Reddit",   "reddit",   "https://www.reddit.com/submit",           [("url", link("reddit")), ("title", text)]),
-            (L10n.menuShareEmail, "sf:envelope", "mailto:",                     [("subject", "RuSwitcher"), ("body", "\(text) \(link("email"))")]),
+            (L10n.menuShareEmail, "sf:envelope", "mailto:",                     [("subject", "NormalSwitcher"), ("body", "\(text) \(link("email"))")]),
         ]
         for (title, icon, base, params) in targets {
             guard let shareURL = Self.buildQueryURL(base, params) else { continue }
@@ -1534,8 +1541,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let os = ProcessInfo.processInfo.operatingSystemVersionString
         let layouts = LayoutSwitcher.currentAndOppositeLanguage().map { "\($0.current)/\($0.opposite)" } ?? "?"
-        let subject = "RuSwitcher \(ver) — \(L10n.contactSubject)"
-        let body = "\n\n\n———\nRuSwitcher \(ver)\nmacOS \(os)\nLayouts: \(layouts)"
+        let subject = "NormalSwitcher \(ver) — \(L10n.contactSubject)"
+        let body = "\n\n\n———\nNormalSwitcher \(ver)\nmacOS \(os)\nLayouts: \(layouts)"
         if let s = Self.buildQueryURL("mailto:\(SettingsManager.contactEmail)",
                                       [("subject", subject), ("body", body)]),
            let url = URL(string: s) {

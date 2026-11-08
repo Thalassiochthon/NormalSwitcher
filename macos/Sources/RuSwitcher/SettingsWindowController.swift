@@ -37,6 +37,7 @@ final class SettingsWindowController {
     var onHideIconChanged: ((Bool) -> Void)?
     var onClipboardHistoryChanged: (() -> Void)?
     var onClipboardHistoryPersistenceChanged: (() -> Void)?
+    var onClipboardHistoryShortcutChanged: ((ClipboardHistoryShortcut) -> Bool)?
     private weak var clipboardHistoryPersistenceCheckbox: NSButton?
     var onFlagSizeChanged: (() -> Void)?
 
@@ -842,8 +843,8 @@ final class SettingsWindowController {
         let item = NSTabViewItem()
         item.label = L10n.settingsTabAdvanced
 
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 660))
-        var y: CGFloat = 610
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 692))
+        var y: CGFloat = 642
 
         let historyCheckbox = NSButton(checkboxWithTitle: L10n.clipboardHistoryEnabled,
                                        target: self, action: #selector(clipboardHistoryChanged(_:)))
@@ -851,6 +852,13 @@ final class SettingsWindowController {
         historyCheckbox.state = SettingsManager.shared.clipboardHistoryEnabled ? .on : .off
         view.addSubview(historyCheckbox)
         y -= 26
+
+        let shortcutButton = NSButton(title: clipboardHistoryShortcutTitle, target: self,
+                                      action: #selector(recordClipboardHistoryShortcut(_:)))
+        shortcutButton.bezelStyle = .rounded
+        shortcutButton.frame = NSRect(x: 36, y: y - 4, width: 265, height: 28)
+        view.addSubview(shortcutButton)
+        y -= 32
 
         let persistenceCheckbox = NSButton(checkboxWithTitle: L10n.clipboardHistoryPersistent,
                                            target: self, action: #selector(clipboardHistoryPersistenceChanged(_:)))
@@ -1021,6 +1029,46 @@ final class SettingsWindowController {
     @objc private func clipboardHistoryPersistenceChanged(_ sender: NSButton) {
         SettingsManager.shared.clipboardHistoryPersistent = sender.state == .on
         onClipboardHistoryPersistenceChanged?()
+    }
+
+    private var clipboardHistoryShortcutTitle: String {
+        String(format: L10n.clipboardHistoryShortcutButton, SettingsManager.shared.clipboardHistoryShortcut.title)
+    }
+
+    @objc private func recordClipboardHistoryShortcut(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.messageText = L10n.clipboardHistoryShortcutPrompt
+        alert.informativeText = L10n.clipboardHistoryShortcutHint
+        alert.addButton(withTitle: L10n.commonCancel).keyEquivalent = "\u{1b}"
+        alert.addButton(withTitle: L10n.clipboardHistoryShortcutReset)
+
+        var captured: ClipboardHistoryShortcut?
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { return event } // Escape cancels.
+            let shortcut = ClipboardHistoryShortcut(keyCode: event.keyCode, flags: event.modifierFlags,
+                                                    characters: event.charactersIgnoringModifiers)
+            MainActor.assumeIsolated {
+                guard let shortcut else {
+                    NSSound.beep()
+                    return
+                }
+                captured = shortcut
+                NSApp.stopModal(withCode: .OK)
+            }
+            return nil
+        }
+        let response = alert.runModal()
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        alert.window.orderOut(nil)
+        let shortcut = response == .alertSecondButtonReturn ? .standard : captured
+        guard let shortcut else { return }
+        if onClipboardHistoryShortcutChanged?(shortcut) == true {
+            sender.title = clipboardHistoryShortcutTitle
+        } else {
+            let warning = NSAlert()
+            warning.messageText = L10n.clipboardHistoryShortcutUnavailable
+            warning.runModal()
+        }
     }
 
     @objc private func hideIconChanged(_ sender: NSButton) {
@@ -1281,7 +1329,7 @@ final class SettingsWindowController {
 
     @objc private func openContact() {
         let email = SettingsManager.shared.contactEmail
-        let subject = "RuSwitcher Feedback"
+        let subject = "NormalSwitcher Feedback"
         if let url = URL(string: "mailto:\(email)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject)") {
             NSWorkspace.shared.open(url)
         }
@@ -1313,7 +1361,7 @@ final class SettingsWindowController {
         let url = URL(fileURLWithPath: path)
         if let service = NSSharingService(named: .composeEmail) {
             service.perform(withItems: [
-                "RuSwitcher debug log" as NSString,
+                "NormalSwitcher debug log" as NSString,
                 url
             ])
         } else {

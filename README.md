@@ -18,11 +18,11 @@ cd NormalSwitcher
 
 Включается в «Настройки → Расширенные». Нажмите **Ctrl+Shift+V**, выберите
 запись стрелками и нажмите Enter. История хранит до 30 текстовых записей.
-Опция «Сохранять историю после перезапуска» сохраняет их на этом Mac.
+Сочетание можно записать в том же разделе настроек. Опция «Сохранять историю после перезапуска» сохраняет записи на этом Mac.
 
 Enable it in **Settings → Advanced**. Press **Ctrl+Shift+V**, select an item
 with the arrow keys, and press Enter. The history holds up to 30 text entries.
-Enable **Keep history after restarting** to save them on this Mac.
+You can record a different shortcut in the same settings tab. Enable **Keep history after restarting** to save entries on this Mac.
 
 ## RuSwitcher
 
