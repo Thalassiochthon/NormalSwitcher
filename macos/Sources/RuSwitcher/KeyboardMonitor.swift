@@ -45,6 +45,7 @@ func rslog(_ msg: String) {
 
 final class KeyboardMonitor: @unchecked Sendable {
     fileprivate var eventTap: CFMachPort?
+    var isRunning: Bool { eventTap != nil }
     private var runLoopSource: CFRunLoopSource?
 
     /// Длина текущего набираемого слова
@@ -121,13 +122,6 @@ final class KeyboardMonitor: @unchecked Sendable {
         self.onAltTap = onAltTap
         self.onAltReconvert = onAltReconvert
 
-        let precheck = CGPreflightListenEventAccess()
-        rslog("Preflight check = \(precheck)")
-        if !precheck {
-            rslog("Requesting access...")
-            CGRequestListenEventAccess()
-        }
-
         triggerConfig = TriggerConfig.current()
         detectors = [:]
         for slot in HotkeySlot.allCases {
@@ -160,14 +154,19 @@ final class KeyboardMonitor: @unchecked Sendable {
             SettingsManager.shared.remoteDesktopMode ? .cgSessionEventTap : .cghidEventTap
         rslog("Tap location: \(SettingsManager.shared.remoteDesktopMode ? "session (remote desktop)" : "hid")")
 
-        guard let tap = CGEvent.tapCreate(
-            tap: tapLocation,
-            place: .tailAppendEventTap,
-            options: options,
-            eventsOfInterest: mask,
-            callback: keyboardCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
+        func createTap(at location: CGEventTapLocation) -> CFMachPort? {
+            CGEvent.tapCreate(tap: location, place: .tailAppendEventTap, options: options,
+                              eventsOfInterest: mask, callback: keyboardCallback,
+                              userInfo: Unmanaged.passUnretained(self).toOpaque())
+        }
+
+        var keyboardTap = createTap(at: tapLocation)
+        if keyboardTap == nil, tapLocation == .cghidEventTap {
+            rslog("HID event tap unavailable; trying the session event tap")
+            keyboardTap = createTap(at: .cgSessionEventTap)
+        }
+
+        guard let tap = keyboardTap else {
             rslog("FAILED to create event tap - no permission")
             return false
         }

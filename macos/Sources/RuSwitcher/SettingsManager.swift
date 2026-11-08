@@ -22,7 +22,6 @@ final class SettingsManager: @unchecked Sendable {
         static let checkUpdatesEnabled = "com.ruswitcher.checkUpdatesEnabled"
         static let betaChannelEnabled = "com.ruswitcher.betaChannelEnabled"
         static let interfaceLanguage = "com.ruswitcher.interfaceLanguage"
-        static let permissionsWereGranted = "com.ruswitcher.permissionsWereGranted"
         static let permissionsPrompted = "com.ruswitcher.permissionsPrompted"
         static let launchAtLoginAsked = "com.ruswitcher.launchAtLoginAsked"
         static let perAppLayout = "com.ruswitcher.perAppLayout"
@@ -194,16 +193,10 @@ final class SettingsManager: @unchecked Sendable {
         }
     }
 
-    /// Флаг: разрешения были ранее выданы (для определения сброса после обновления)
     /// Системный запрос разрешений уже показывали: второй раз macOS его не покажет.
     var permissionsPrompted: Bool {
         get { defaults.bool(forKey: Keys.permissionsPrompted) }
         set { defaults.set(newValue, forKey: Keys.permissionsPrompted) }
-    }
-
-    var permissionsWereGranted: Bool {
-        get { defaults.bool(forKey: Keys.permissionsWereGranted) }
-        set { defaults.set(newValue, forKey: Keys.permissionsWereGranted) }
     }
 
     var launchAtLoginAsked: Bool {

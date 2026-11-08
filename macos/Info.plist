@@ -10,6 +10,8 @@
 	<string>NormalSwitcher</string>
 	<key>CFBundleExecutable</key>
 	<string>NormalSwitcher</string>
+	<key>CFBundleIconFile</key>
+	<string>NormalSwitcher.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.antonjas.normalswitcher</string>
 	<key>CFBundleInfoDictionaryVersion</key>

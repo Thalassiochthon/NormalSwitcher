@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settingsController = SettingsWindowController()
     private let perAppLayoutManager = PerAppLayoutManager()
     private var permissionCheckTimer: Timer?
+    private var requestedInputMonitoring = false
     private var permissionsReminder: DispatchWorkItem?
     private var permissionsAlertShown = false
     private var iconRefreshTimer: Timer?
@@ -55,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Opening from Finder or Spotlight should be visible even if the menu bar is full.
         // If permissions are missing, the wizard already handles the first interaction.
-        if !startedAsLoginItem && Self.permissionsGranted {
+        if !startedAsLoginItem && permissionsGranted {
             settingsController.showWindow()
         }
     }
@@ -220,43 +221,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Permission Wizard
 
     private func runPermissionWizard(interactive: Bool = false) {
-        let acc = AXIsProcessTrusted()
-        let inp = CGPreflightListenEventAccess()
-        rslog("Permissions: accessibility=\(acc) inputMonitoring=\(inp)")
-
-        if acc && inp {
-            // Запоминаем что разрешения были даны
-            SettingsManager.shared.permissionsWereGranted = true
-            if !monitoringActive { startMonitoring() }
-            // Ручная проверка из меню должна давать видимый отклик.
+        if activateKeyboardMonitoring() {
             if interactive { showPermissionsOKAlert() }
             return
         }
 
-        // Проверяем: разрешения были раньше, а теперь сброшены (обновление)
-        if SettingsManager.shared.permissionsWereGranted {
-            rslog("Permissions were previously granted — reset detected after update")
-            SettingsManager.shared.permissionsWereGranted = false
-            armPermissionsReminder()
-            showPermissionsResetAlert()
-            return
-        }
-
-        // Системное окно запроса macOS показывает один раз: закрыл или не заметил — и приложение
-        // молча не работает. Поэтому со второго раза объясняем сами.
         let settings = SettingsManager.shared
         let explain = interactive || settings.permissionsPrompted
         settings.permissionsPrompted = true
 
-        // Первый запуск — обычный визард
-        if acc {
-            showStep_InputMonitoring()
-        } else {
-            showStep_Accessibility()
+        if !AXIsProcessTrusted() {
+            let options = ["AXTrustedCheckOptionPrompt" as CFString: true as CFBoolean] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
         }
 
+        startPermissionPolling { [weak self] in
+            _ = self?.activateKeyboardMonitoring()
+        }
         if explain {
-            // Не из applicationDidFinishLaunching: модальное окно задержало бы остальной запуск.
             permissionsReminder?.cancel()
             DispatchQueue.main.async { [weak self] in self?.showPermissionsMissingAlert() }
         } else {
@@ -264,7 +246,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private static var permissionsGranted: Bool { AXIsProcessTrusted() && CGPreflightListenEventAccess() }
+    private var permissionsGranted: Bool {
+        AXIsProcessTrusted() && keyboardMonitor.isRunning
+    }
+
+    private func activateKeyboardMonitoring() -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+        if !monitoringActive {
+            startMonitoring()
+        } else if !keyboardMonitor.isRunning {
+            keyboardMonitor.reconfigure()
+        }
+
+        if permissionsGranted {
+            permissionCheckTimer?.invalidate()
+            permissionCheckTimer = nil
+            permissionsReminder?.cancel()
+            return true
+        }
+
+        // A separate listen grant is only needed if the keyboard event tap could not start.
+        if !requestedInputMonitoring {
+            requestedInputMonitoring = true
+            CGRequestListenEventAccess()
+        }
+        return false
+    }
 
     private func armPermissionsReminder() {
         permissionsReminder?.cancel()
@@ -275,14 +282,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Нет разрешений и системного окна запроса больше не будет: ведём в нужный раздел настроек.
     private func showPermissionsMissingAlert() {
-        guard !Self.permissionsGranted, !permissionsAlertShown else { return }
+        guard !permissionsGranted, !permissionsAlertShown else { return }
         permissionsAlertShown = true
         defer { permissionsAlertShown = false }
         let accessibility = AXIsProcessTrusted()
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = L10n.permissionsMissingTitle
-        alert.informativeText = L10n.permissionsMissingText
+        alert.informativeText = accessibility ? L10n.permissionsMissingInput : L10n.permissionsMissingText
         alert.addButton(withTitle: L10n.permissionsMissingOpen)
         alert.addButton(withTitle: L10n.permissionsMissingLater)
         NSApp.activate(ignoringOtherApps: true)
@@ -303,53 +310,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.runModal()
     }
 
-    /// Уведомление о сбросе разрешений после обновления
-    private func showPermissionsResetAlert() {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = L10n.wizardPermissionsResetTitle
-        alert.informativeText = L10n.wizardPermissionsResetText
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-
-        // Сбрасываем старые записи через tccutil
-        resetPermissions()
-
-        // Запрашиваем заново
-        showStep_Accessibility()
-    }
-
-    /// Сбрасывает старые записи разрешений для нашего bundle ID
-    private func resetPermissions() {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.ruswitcher.app"
-        rslog("Resetting TCC entries for \(bundleID)")
-
-        for service in ["Accessibility", "ListenEvent"] {
-            let reset = Process()
-            reset.launchPath = "/usr/bin/tccutil"
-            reset.arguments = ["reset", service, bundleID]
-            try? reset.run()
-            reset.waitUntilExit()
-        }
-
-        rslog("TCC entries reset done")
-    }
-
-    private func showStep_Accessibility() {
-        // AXIsProcessTrustedWithOptions с prompt=true показывает системный диалог
-        // и добавляет программу в список Accessibility автоматически
-        let options = ["AXTrustedCheckOptionPrompt" as CFString: true as CFBoolean] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-
-        startPermissionPolling { [weak self] in
-            guard let self, AXIsProcessTrusted() else { return }
-            rslog("Accessibility granted!")
-            self.permissionCheckTimer?.invalidate()
-            self.permissionCheckTimer = nil
-            self.showStep_InputMonitoring()
-        }
-    }
-
     /// Опрос идёт и пока открыто наше окно с разрешениями: в common-режимах таймер не стоит
     /// на модальном цикле.
     private func startPermissionPolling(_ check: @escaping @MainActor () -> Void) {
@@ -361,43 +321,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         permissionCheckTimer = timer
     }
 
-    private func showStep_InputMonitoring() {
-        // CGRequestListenEventAccess() показывает системный диалог и добавляет
-        // программу в список Input Monitoring автоматически
-        let preflightOK = CGPreflightListenEventAccess()
-        rslog("Preflight check = \(preflightOK)")
-
-        if preflightOK {
-            // Уже есть — сразу запускаем
-            SettingsManager.shared.permissionsWereGranted = true
-            startMonitoring()
-            return
-        }
-
-        rslog("Requesting access...")
-        CGRequestListenEventAccess()
-
-        startPermissionPolling { [weak self] in
-            guard let self, CGPreflightListenEventAccess() else { return }
-            rslog("Input Monitoring granted! Restarting...")
-            SettingsManager.shared.permissionsWereGranted = true
-            self.permissionCheckTimer?.invalidate()
-            self.permissionCheckTimer = nil
-            self.restartApp()
-        }
-    }
-
-    private func restartApp() {
-        rslog("Restarting from: \(Bundle.main.bundlePath)")
-        AppRelauncher.relaunch()
-    }
-
     // MARK: - Start Monitoring
 
     private func startMonitoring() {
-        permissionCheckTimer?.invalidate()
-        permissionCheckTimer = nil
-
         if !keyboardMonitor.start(
             onAltTap: { [weak self] in
                 guard let self else { return }
@@ -505,10 +431,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
         ) {
-            rslog("Event tap failed - will retry in 5s")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                self?.startMonitoring()
-            }
             return
         }
 
@@ -604,15 +526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.textConverter.clearState()
             }
         }
-        updateStatusIcon()        // сначала выставляем флаг меню-бара, пока индикатора ещё нет
         syncCaretIndicator()      // затем создаём индикатор — без стартового ложного «попа»
-        // Страховка к issue #9: системное уведомление о смене раскладки ненадёжно
-        // (особенно через удалённый стол — на той машине оно часто не доходит), поэтому
-        // флаг «застревает». Постоянный лёгкий опрос держит иконку в синхроне с системой.
-        iconRefreshTimer?.invalidate()
-        iconRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateStatusIcon() }
-        }
         rslog("Monitoring started successfully")
 
         if SettingsManager.shared.perAppLayout {
@@ -1012,6 +926,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // (updateStatusIcon/rebuildMenu) продолжают работать без nil-проверок.
         statusItem.isVisible = !SettingsManager.shared.hideMenuBarIcon
         rebuildMenu()
+        updateStatusIcon()
+        // Keep the flag current even while keyboard permissions are pending.
+        iconRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateStatusIcon() }
+        }
         // issue #9: иконка должна отражать раскладку и при СИСТЕМНОЙ смене (стандартный/
         // переопределённый хоткей), а не только при нашей конверсии. Слушаем системное
         // распределённое уведомление о смене источника ввода.
@@ -1048,7 +967,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let missingItem = NSMenuItem(title: L10n.menuPermissionsMissing, action: #selector(recheckPermissions), keyEquivalent: "")
         missingItem.target = self
         missingItem.tag = Self.permissionsItemTag
-        missingItem.isHidden = Self.permissionsGranted
+        missingItem.isHidden = permissionsGranted
         menu.addItem(missingItem)
         menu.addItem(NSMenuItem.separator())
 
@@ -1161,7 +1080,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// а текущую меняют и мимо нас — системным хоткеем).
     func menuWillOpen(_ menu: NSMenu) {
         guard menu === statusItem.menu else { return }
-        menu.item(withTag: Self.permissionsItemTag)?.isHidden = Self.permissionsGranted
+        menu.item(withTag: Self.permissionsItemTag)?.isHidden = permissionsGranted
         let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? 3
         for old in menu.items where old.tag == Self.layoutItemTag { menu.removeItem(old) }
         for (offset, item) in layoutMenuItems().enumerated() {
@@ -1507,6 +1426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        iconRefreshTimer?.invalidate()
         clipboardHistory.stop()
         // Не теряем буфер обмена в 2-секундном окне отложенного восстановления
         // (актуально и при само-обновлении, которое завершает процесс).
