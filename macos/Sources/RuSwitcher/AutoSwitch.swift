@@ -60,9 +60,16 @@ enum Dict {
 
     /// true — слово есть в системном словаре языка (орфография корректна).
     @MainActor static func isValidWord(_ word: String, lang: String) -> Bool {
+        checkWord(word, lang: lang) == true
+    }
+
+    @MainActor static func checkWord(_ word: String, lang: String) -> Bool? {
+        // AppleSpell can return NSNotFound without checking anything when its service fails.
+        var wordCount = -1
         let range = checker.checkSpelling(of: word, startingAt: 0, language: lang,
-                                          wrap: false, inSpellDocumentWithTag: 0, wordCount: nil)
-        return range.location == NSNotFound
+                                          wrap: false, inSpellDocumentWithTag: 0, wordCount: &wordCount)
+        if range.location != NSNotFound { return false }
+        return wordCount > 0 ? true : nil
     }
 }
 
@@ -167,8 +174,14 @@ enum LayoutDetector {
         // Двухбуквенное тело с знаком («im.» → «шью» после разбора хвоста) словарь не
         // различает, поэтому ещё и частотный список коротких слов текущего языка.
         if Dict.isAvailable(cur), let body = wordBody(typed) {
-            if Dict.isValidWord(typed.lowercased(), lang: cur) { return .keep }
             if body.count == 2, ShortWords.common(cur)?.contains(body.lowercased()) == true { return .keep }
+            if let valid = Dict.checkWord(typed.lowercased(), lang: cur) {
+                if valid { return .keep }
+            } else if let pack = FrequencyPacks.pack(for: cur) {
+                if pack.contains(body.lowercased()) { return .keep }
+            } else {
+                return .undecided
+            }
         }
         return .switchToConverted
     }
