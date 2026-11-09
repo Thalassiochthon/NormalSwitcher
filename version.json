@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "build": "65",
+  "dev": "",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.0.0",
+  "notes": "Первый релиз с собственной нумерацией NormalSwitcher. При переходе с 3.x один раз замените приложение вручную из DMG. Следующие версии доступны через встроенное обновление. В сборку входят плоские флаги, упрощённые настройки и исправление вставки из истории буфера.\n\nThe first release in NormalSwitcher’s independent version line. Replace 3.x manually once using the DMG. Future versions are available via the in-app updater. This release includes flat flags, simplified settings and a clipboard history paste fix.",
+  "sha256": "060a0ddb171a9fc2a23a0b044c17dfc826b1e3c50baf3fa346ac01512388ff6e"
+}

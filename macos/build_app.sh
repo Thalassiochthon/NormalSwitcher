@@ -1,0 +1,83 @@
+#!/bin/bash
+set -e
+
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_NAME="NormalSwitcher"
+PRODUCT_NAME="RuSwitcher"
+APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
+# version.json живёт в КОРНЕ репозитория (живой фид обновлений) — не переносить!
+# RS_VERSION_JSON переопределяет источник версии (для бета-сборок → version-beta.json).
+VERSION_JSON="${RS_VERSION_JSON:-$PROJECT_DIR/../version.json}"
+
+# version.json — единый источник правды. Значения в Info.plist в репо
+# игнорируются: скрипт штампует CFBundleShortVersionString и CFBundleVersion
+# в копию Info.plist внутри собранного бандла.
+SHORT_VERSION=$(/usr/bin/python3 -c "import json,sys;print(json.load(open('$VERSION_JSON'))['version'])")
+BUILD_VERSION=$(/usr/bin/python3 -c "import json,sys;print(json.load(open('$VERSION_JSON')).get('build','1'))")
+DEV_TAG=$(/usr/bin/python3 -c "import json,sys;print(json.load(open('$VERSION_JSON')).get('dev',''))")
+
+if [ -z "$SHORT_VERSION" ]; then
+    echo "ERROR: could not read version from $VERSION_JSON"
+    exit 1
+fi
+
+echo "=== Building $APP_NAME v$SHORT_VERSION (build $BUILD_VERSION) ==="
+
+cd "$PROJECT_DIR"
+
+# 1. Собираем для архитектуры этого Mac.
+SWIFT_BUILD_FLAGS="-c release"
+echo "→ swift build $SWIFT_BUILD_FLAGS..."
+# shellcheck disable=SC2086
+swift build $SWIFT_BUILD_FLAGS
+# shellcheck disable=SC2086
+BUILD_DIR=$(swift build --show-bin-path $SWIFT_BUILD_FLAGS 2>/dev/null)
+# Путь к продукту зависит от версии Swift (.build/apple/… до macOS 27, .build/out/… после),
+# поэтому спрашиваем его у самого swift — и останавливаемся, если ответа нет.
+if [ -z "$BUILD_DIR" ] || [ ! -f "$BUILD_DIR/$PRODUCT_NAME" ]; then
+    echo "✗ swift build не сообщил, где лежит собранный $APP_NAME (получено: '${BUILD_DIR:-пусто}')" >&2
+    exit 1
+fi
+
+# 2. Создаём .app bundle
+echo "→ Creating app bundle..."
+rm -rf "$APP_BUNDLE"
+mkdir -p "$APP_BUNDLE/Contents/MacOS"
+mkdir -p "$APP_BUNDLE/Contents/Resources"
+
+# 3. Копируем бинарник
+cp "$BUILD_DIR/$PRODUCT_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+# 4. Копируем Info.plist и штампуем версию из version.json
+cp "$PROJECT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$APP_BUNDLE/Contents/Info.plist"
+# Dev-метка (буква) для непубликуемых сборок — пусто для релиза. Показывается в About/меню.
+/usr/libexec/PlistBuddy -c "Set :RSDevTag $DEV_TAG" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+  || /usr/libexec/PlistBuddy -c "Add :RSDevTag string $DEV_TAG" "$APP_BUNDLE/Contents/Info.plist"
+echo "→ Stamped Info.plist: CFBundleShortVersionString=$SHORT_VERSION$DEV_TAG CFBundleVersion=$BUILD_VERSION"
+
+# 5. Include the upstream MIT license in the signed bundle.
+cp "$PROJECT_DIR/../LICENSE" "$APP_BUNDLE/Contents/Resources/LICENSE"
+cp "$PROJECT_DIR/NormalSwitcher.icns" "$APP_BUNDLE/Contents/Resources/NormalSwitcher.icns"
+
+# 6. Создаём PkgInfo
+echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
+
+# 7. Подписываем Developer ID (разрешения macOS привязаны к подписи —
+#    при одинаковой подписи разрешения сохраняются между обновлениями)
+# RS_SIGN_ID переопределяет identity (CI без сертификата ставит "-" — ad-hoc).
+SIGN_ID="${RS_SIGN_ID:--}"
+echo "→ Code signing..."
+codesign --force --deep --sign "$SIGN_ID" \
+    --options runtime \
+    --entitlements "$PROJECT_DIR/RuSwitcher.entitlements" \
+    "$APP_BUNDLE"
+
+echo ""
+echo "=== Done! ==="
+echo "App bundle: $APP_BUNDLE"
+echo "Signed with: $SIGN_ID"
+echo ""
+echo "To install:"
+echo "  cp -R \"$APP_BUNDLE\" /Applications/"

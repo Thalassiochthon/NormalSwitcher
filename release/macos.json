@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0",
+  "build": "65",
+  "manual_migration": false,
+  "notes": "Первый релиз с собственной нумерацией NormalSwitcher. При переходе с 3.x один раз замените приложение вручную из DMG. Следующие версии доступны через встроенное обновление. В сборку входят плоские флаги, упрощённые настройки и исправление вставки из истории буфера.\n\nThe first release in NormalSwitcher’s independent version line. Replace 3.x manually once using the DMG. Future versions are available via the in-app updater. This release includes flat flags, simplified settings and a clipboard history paste fix.",
+  "zip_sha256": "681f28396a176241907000ab859eccaa1b8cb2a0a18f6e7a277b5b9ce39f9a50",
+  "blobs": [
+    "26ff80e5c27ab0ff7f9cda5b3516f5bf4756e7bf",
+    "3a199707173eaf63d851656cb07cced417f50455",
+    "b75f2eded8419dc7b663383b65ef674a3312cc40",
+    "7e535ff043f2c4ef2feeb23139e40bffdd747aed",
+    "599ee81102d55435c8a7a28248da15f0cbcad60d",
+    "779560a08a6a7c47a0e005086b318b85131bf665",
+    "94f95fff97ef944901c399fbc479a1be3c00785c",
+    "a0eb9da819985258b2d9f760d9fbd7eb9caa2499",
+    "77b0843f4d6289cf3b9780822e082fdf4795fe5c",
+    "07d7fa9b5369824ab16abd5dcc23d19f42376074",
+    "dc70c47ba1f1e0d0c5ad1ba83eca69c5bc031f58",
+    "cd4a56c74bf8d9750dc8d89874135f97dc8ea805",
+    "d96defac20fb9c2f79a2a8049e42ed4a961d31b4"
+  ]
+}
