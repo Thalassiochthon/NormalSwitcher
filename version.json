@@ -1,8 +1,8 @@
 {
-  "version": "1.0.2",
-  "build": "67",
+  "version": "1.1.0",
+  "build": "70",
   "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.0.2",
-  "notes": "Исправили автоконверсию при сбое системного словаря macOS. Если проверка слова не состоялась, NormalSwitcher использует установленные словари, чтобы распознать ошибочную раскладку. Проверены преобразования в обе стороны, обычные слова, короткие неоднозначные слова и пунктуация.\n\nFix automatic layout conversion when the macOS spell service is unavailable. If the system did not check a word, NormalSwitcher can use the installed word packs. Tested both directions, valid words, ambiguous short words, and punctuation.\n",
-  "sha256": "501640e8078658807a7bb07500716d5f0dbc70587778e9a885a08b3e6cf651ce"
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.0",
+  "notes": "Переработали настройки. Сочетания, автоисправление и буфер обмена теперь в отдельных разделах, дополнительные параметры можно раскрыть по мере необходимости. В меню появился короткий пункт «Выход» с ⌘Q.\n\nПри быстром наборе NormalSwitcher применяет исправление раскладки до исходного пробела, если macOS подтверждает, что текст можно безопасно заменить.\n\nRedesigned the settings window and shortened the menu’s Quit label. During fast local typing, automatic layout correction is applied before the original space when macOS can verify the text can be safely replaced.\n",
+  "sha256": "2f56e2ce4c3f62788e38c125b1aecd2ecd9d7005a78c9ec2fecdd4ca745cb6fa"
 }
