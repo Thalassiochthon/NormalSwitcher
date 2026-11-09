@@ -7,6 +7,7 @@ permissions:
   contents: write
 concurrency:
   group: normalswitcher-macos-release
+  cancel-in-progress: true
 jobs:
   release:
     runs-on: macos-15
@@ -27,6 +28,18 @@ jobs:
         run: |
           set -euo pipefail
           asset="NormalSwitcher-$RELEASE_VERSION.dmg"
-          hdiutil create -volname NormalSwitcher -srcfolder macos/NormalSwitcher.app -format UDZO "$asset"
+          staging="$RUNNER_TEMP/normalswitcher-dmg"
+          mkdir -p "$staging"
+          ditto macos/NormalSwitcher.app "$staging/NormalSwitcher.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname NormalSwitcher -srcfolder "$staging" -format UDZO "$asset"
           hdiutil verify "$asset"
+          mountpoint="$RUNNER_TEMP/normalswitcher-mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$asset"
+          trap 'hdiutil detach "$mountpoint" -quiet' EXIT
+          codesign --verify --deep --strict "$mountpoint/NormalSwitcher.app"
+          if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release upload "v$RELEASE_VERSION" "$asset" --clobber
+            exit 0
+          fi
           gh release create "v$RELEASE_VERSION" "$asset" --target "$GITHUB_SHA" --title "NormalSwitcher $RELEASE_VERSION" --notes "Flat menu bar flags, simpler menus, and more reliable pasting from clipboard history. This build requires one manual installation from the disk image."
