@@ -1,8 +1,8 @@
 {
-  "version": "1.0.1",
-  "build": "66",
+  "version": "1.0.2",
+  "build": "67",
   "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.0.1",
-  "notes": "Перехват клавиатуры теперь начинается на уровне пользовательской сессии macOS. Это исправляет сценарий, когда подключение считалось успешным, но автоконверсия не получала нажатия. Улучшена проверка доступа к клавиатуре. При включённой отладке журнал подтверждает первое полученное нажатие без записи его содержимого.\n\nKeyboard monitoring now starts at the macOS session tap. Permission checks distinguish keyboard access from mouse-only monitoring, and debug logging confirms the first keyboard event without recording its content.",
-  "sha256": "e50ebf79618ca66933086e2dd08e30a951cb6926ba51fe33a2c2d3bb1ee5bf9a"
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.0.2",
+  "notes": "Исправили автоконверсию при сбое системного словаря macOS. Если проверка слова не состоялась, NormalSwitcher использует установленные словари, чтобы распознать ошибочную раскладку. Проверены преобразования в обе стороны, обычные слова, короткие неоднозначные слова и пунктуация.\n\nFix automatic layout conversion when the macOS spell service is unavailable. If the system did not check a word, NormalSwitcher can use the installed word packs. Tested both directions, valid words, ambiguous short words, and punctuation.\n",
+  "sha256": "501640e8078658807a7bb07500716d5f0dbc70587778e9a885a08b3e6cf651ce"
 }
