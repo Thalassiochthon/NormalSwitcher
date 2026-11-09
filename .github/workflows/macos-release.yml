@@ -7,9 +7,10 @@ permissions:
   contents: write
 concurrency:
   group: normalswitcher-macos-release
+  cancel-in-progress: true
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - name: Verify and publish the signed release

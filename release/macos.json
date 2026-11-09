@@ -2,7 +2,7 @@
   "version": "1.0.2",
   "build": "67",
   "manual_migration": false,
-  "notes": "Исправили автоконверсию при сбое системного словаря macOS. Если проверка слова не состоялась, NormalSwitcher использует установленные словари, чтобы распознать ошибочную раскладку. Проверены преобразования в обе стороны, обычные слова, короткие неоднозначные слова и пунктуация.\n\nFix automatic layout conversion when the macOS spell service is unavailable. If the system did not check a word, NormalSwitcher can use the installed word packs. Tested both directions, valid words, ambiguous short words, and punctuation.",
+  "notes": "Исправили автоконверсию при сбое системного словаря macOS. Если проверка слова не состоялась, NormalSwitcher использует установленные словари, чтобы распознать ошибочную раскладку. Проверены преобразования в обе стороны, обычные слова, короткие неоднозначные слова и пунктуация.\n\nFix automatic layout conversion when the macOS spell service is unavailable. If the system did not check a word, NormalSwitcher can use the installed word packs. Tested both directions, valid words, ambiguous short words, and punctuation.\n",
   "zip_sha256": "7a07392c104bacb5435855c19653d2d0515dcf8bef810c836c5102a62c4ee290",
   "blobs": [
     "d1296c0ac7b2e25983bdaf1ee53e4309c3353d05",
