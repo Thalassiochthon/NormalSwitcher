@@ -55,7 +55,6 @@ final class SettingsManager: @unchecked Sendable {
         static let secureInputNotice = "com.ruswitcher.secureInputNotice"
         static let hideMenuBarIcon = "com.ruswitcher.hideMenuBarIcon"
         static let frequencyPacks = "com.ruswitcher.frequencyPacks"
-        static let flagSize = "com.ruswitcher.flagSize"
         static let frequencyPacksOffered = "com.ruswitcher.frequencyPacksOffered"
         static let frequencyPacksChecked = "com.ruswitcher.frequencyPacksChecked"
         static let monochromeIcon = "com.ruswitcher.monochromeIcon"
@@ -362,16 +361,6 @@ final class SettingsManager: @unchecked Sendable {
     var hideMenuBarIcon: Bool {
         get { defaults.bool(forKey: Keys.hideMenuBarIcon) }
         set { defaults.set(newValue, forKey: Keys.hideMenuBarIcon) }
-    }
-
-    /// Размер флага в меню-баре, pt (0 — системный). Идея из форка landco-debug.
-    static let flagSizes = [0, 16, 18, 20]
-    var flagSize: Int {
-        get {
-            let v = defaults.integer(forKey: Keys.flagSize)
-            return Self.flagSizes.contains(v) ? v : 0
-        }
-        set { defaults.set(newValue, forKey: Keys.flagSize) }
     }
 
     /// Скачиваемые частотные словари для автоконверсии (3.5). По умолчанию ВЫКЛ.

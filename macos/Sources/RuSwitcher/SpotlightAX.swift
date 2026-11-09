@@ -16,7 +16,7 @@ enum SpotlightAX {
     ///   2) процесс com.apple.Spotlight реально держит сфокусированное текстовое поле
     ///      (когда Spotlight закрывается, фокус уходит → поля нет → гейт закрыт).
     @MainActor
-    static func isActive() -> Bool {
+    static func isActive(timeout: Float = 0.2) -> Bool {
         // 1) полностью видимое окно Spotlight (alpha≈1, а не гаснущее)
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return false
@@ -32,12 +32,14 @@ enum SpotlightAX {
             $0.bundleIdentifier == "com.apple.Spotlight"
         }) else { return false }
         let ax = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(ax, 0.2)
+        AXUIElementSetMessagingTimeout(ax, timeout)
         var fRaw: AnyObject?
         guard AXUIElementCopyAttributeValue(ax, kAXFocusedUIElementAttribute as CFString, &fRaw) == .success,
               let f = fRaw else { return false }
+        let focus = f as! AXUIElement
+        AXUIElementSetMessagingTimeout(focus, timeout)
         var roleRaw: AnyObject?
-        AXUIElementCopyAttributeValue(f as! AXUIElement, kAXRoleAttribute as CFString, &roleRaw)
+        AXUIElementCopyAttributeValue(focus, kAXRoleAttribute as CFString, &roleRaw)
         return (roleRaw as? String) == (kAXTextFieldRole as String)
     }
 }

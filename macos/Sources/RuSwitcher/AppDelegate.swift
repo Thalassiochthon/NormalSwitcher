@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.onAutoSwitchChanged = { [weak self] _ in
             // Не адресуем пункт по индексу: с 2.5.0 item(at: 0) — строка версии, а со списком
             // раскладок индексы вообще динамические. Пересборка — как у соседних колбэков.
+            self?.refreshSpaceTap()
             self?.rebuildMenu()
         }
         settingsController.onPerAppLayoutChanged = { [weak self] enabled in
@@ -91,8 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.onTriggerChanged = { [weak self] in
             self?.reconfigureTap()
         }
-        settingsController.onFlagSizeChanged = { [weak self] in self?.updateStatusIcon() }
+        settingsController.onMenuBarAppearanceChanged = { [weak self] in self?.updateStatusIcon() }
         settingsController.onAutoConvertChanged = { [weak self] enabled in
+            self?.refreshSpaceTap()
             self?.rebuildMenu()  // синхронизировать галочку в меню
             if enabled { self?.offerFrequencyPacksIfNeeded() }
         }
@@ -442,8 +444,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         monitoringActive = true
-        keyboardMonitor.onWordBoundary = { [weak self] in
-            self?.handleAutoConvert()
+        keyboardMonitor.onWordBoundary = { [weak self] postBeforeSpace in
+            self?.handleAutoConvert(postBeforeSpace: postBeforeSpace)
         }
         keyboardMonitor.onWordEndSync = { [weak self] key, keys, code, flags in
             self?.handleWordEndSync(key: key, keys: keys, keyCode: code, flags: flags) ?? false
@@ -666,11 +668,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Конвейер на пробеле: пробел уже в поле, стираем слово с пробелами и печатаем результат.
-    private func handleAutoConvert() {
+    private func handleAutoConvert(postBeforeSpace: ((CGEvent) -> Void)?) {
         rslog("auto: fired")
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.12
+        let app = postBeforeSpace == nil ? nil : NSWorkspace.shared.frontmostApplication
+        let layoutID = postBeforeSpace == nil ? "" : LayoutSwitcher.currentLayoutID()
+        // The first system spell check can start AppleSpell. Wait for the launch warm-up
+        // before running the detector in an active keyboard callback.
+        if postBeforeSpace != nil, !Dict.didWarmUp { return }
         let bc = keyboardMonitor.boundaryCount
         guard let (action, ctx) = evaluateWordEnd(keys: keyboardMonitor.prevWordKeys) else { return }
+        if let postBeforeSpace {
+            guard let app, action != .none, ProcessInfo.processInfo.systemUptime < deadline else { return }
+            if SpotlightAX.isActive(timeout: 0.012) {
+                keyboardMonitor.deferWordBoundary()
+                return
+            }
+            guard let edit = wordEndReplacement(action, ctx),
+                  textConverter.replaceBeforeSpace(original: ctx.pair.original, insert: edit.text,
+                                                   deleteCount: ctx.keys.count, switchesLayout: edit.switchesLayout,
+                                                   app: app, layoutID: layoutID, deadline: deadline,
+                                                   post: postBeforeSpace) else { return }
+            keyboardMonitor.markConverted()
+            switch action {
+            case .convert(let core, _):
+                LayoutSwitcher.switchToOpposite()
+                DispatchQueue.main.async { [weak self] in self?.updateStatusIcon() }
+                lastAutoConverted = (String(ctx.pair.original.prefix(core)), Date())
+            case .fix(_, .typo), .fix(_, .number):
+                lastAutoConverted = (ctx.pair.original, Date())
+            default:
+                lastAutoConverted = nil
+            }
+            return
+        }
+
         let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         // Удалёнка: НЕ выходим сразу — прогоняем детектор по своему (чистому) буферу, и при
         // «не той раскладке» переключаем СВОЮ раскладку (конверсию делает инстанс на той стороне).
@@ -766,39 +798,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if SpotlightAX.isActive() { return false }
         // Долгое решение (холодный AppleSpell) — не рискуем таймаутом tap'а: клавиша уходит как есть.
         if Date().timeIntervalSince(started) > 0.2 { rslog("wordEnd: decision too slow — pass"); return false }
-        let insert: String
-        var switchLayout = false
-        var isTypo = false
-        switch action {
-        case .none:
-            return false
-        case .expand(let text):
-            insert = text
-        case .fix(let text, let kind):
-            insert = text
-            isTypo = kind == .typo
-        case .convert(let core, let fixedCore):
-            let suffix = String(ctx.pair.original.dropFirst(core))
-            let coreKeys = suffix.isEmpty ? ctx.keys : Array(ctx.keys.prefix(core))
-            guard let pair = suffix.isEmpty ? ctx.pair : DynamicKeyMapping.convertKeys(coreKeys),
-                  !AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) else { return false }
-            // Проброшенный удалёнкой текст: хвост литералом, как в performAutoConvert (скептик #33).
-            let tail = coreKeys.allSatisfy({ $0.char != nil }) ? suffix : DynamicKeyMapping.punctThroughCurrentPair(suffix)
-            insert = (fixedCore ?? pair.converted) + tail
-            switchLayout = true
-        }
-        rslog("wordEnd \(key): replace \(ctx.keys.count) → \(insert.count)")
+        guard let edit = wordEndReplacement(action, ctx) else { return false }
+        let isTypo: Bool
+        if case .fix(_, .typo) = action { isTypo = true } else { isTypo = false }
+        rslog("wordEnd \(key): replace \(ctx.keys.count) → \(edit.text.count)")
         // Сразу, без main.async (ревью M2): замена встаёт в очередь инжекта раньше, чем
         // успеют прийти клавиши, нажатые после Enter.
-        let replaced = textConverter.replaceTail(deleteCount: ctx.keys.count, insert: insert,
+        let replaced = textConverter.replaceTail(deleteCount: ctx.keys.count, insert: edit.text,
                                                  repostKey: (keyCode, flags), clearInlineCompletion: true,
                                                  skipIfInlineCompletion: isTypo)
         lastAutoConverted = nil
-        if replaced, switchLayout {   // ревью M1: замены не было — раскладку не трогаем
+        if replaced, edit.switchesLayout {   // ревью M1: замены не было — раскладку не трогаем
             LayoutSwitcher.switchToOpposite()
             updateStatusIcon()
         }
         return true
+    }
+
+    private func wordEndReplacement(_ action: WordEndAction, _ ctx: WordCtx) -> (text: String, switchesLayout: Bool)? {
+        switch action {
+        case .none:
+            return nil
+        case .expand(let text), .fix(let text, _):
+            return (text, false)
+        case .convert(let core, let fixedCore):
+            let suffix = String(ctx.pair.original.dropFirst(core))
+            let keys = suffix.isEmpty ? ctx.keys : Array(ctx.keys.prefix(core))
+            guard let pair = suffix.isEmpty ? ctx.pair : DynamicKeyMapping.convertKeys(keys),
+                  !AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) else { return nil }
+            let tail = keys.allSatisfy({ $0.char != nil }) ? suffix : DynamicKeyMapping.punctThroughCurrentPair(suffix)
+            return ((fixedCore ?? pair.converted) + tail, true)
+        }
     }
 
     /// Предлагает включить автозагрузку при первом запуске (один раз)
@@ -840,6 +870,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if alert.runModal() == .alertFirstButtonReturn {
             settings.autoConvert = true
+            refreshSpaceTap()
             rebuildMenu()  // синхронизировать галочку «Автоматическая конверсия» в меню
             rslog("User enabled auto-convert at onboarding")
         } else {
@@ -1064,9 +1095,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let changed = lastFlagShown != flag
         lastFlagShown = flag
         let settings = SettingsManager.shared
-        let flagHeight = settings.flagSize == 0 ? 12 : max(10, settings.flagSize - 4)
         statusItem.button?.title = ""
-        statusItem.button?.image = (settings.monochromeIcon ? nil : flatFlag(for: flag, height: flagHeight))
+        statusItem.button?.image = (settings.monochromeIcon ? nil : flatFlag(for: flag, height: 12))
             ?? badgeImage(for: currentBadgeLabel())
         if changed { caretIndicator?.layoutChanged() }
     }
@@ -1224,7 +1254,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         SettingsManager.shared.autoConvert.toggle()
         sender.state = SettingsManager.shared.autoConvert ? .on : .off
         settingsController.updateAutoConvertState(SettingsManager.shared.autoConvert)   // #4
+        refreshSpaceTap()
         if SettingsManager.shared.autoConvert { offerFrequencyPacksIfNeeded() }
+    }
+
+    private func refreshSpaceTap() {
+        if keyboardMonitor.needsSpaceTapReconfigure { reconfigureTap() }
     }
 
     /// Пересоздаёт event tap и, если создание не удалось (например, session-tap отклонён),

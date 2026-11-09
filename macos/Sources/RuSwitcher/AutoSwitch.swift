@@ -8,6 +8,7 @@ enum Dict {
     @MainActor private static let checker = NSSpellChecker.shared
     /// Кэш списка словарей: availableLanguages ходит в AppleSpell — не дёргаем на каждое слово.
     @MainActor private static var cachedLanguages: [String]?
+    @MainActor private(set) static var didWarmUp = false
 
     @MainActor static func isAvailable(_ lang: String) -> Bool {
         let two = String(lang.prefix(2))
@@ -29,6 +30,7 @@ enum Dict {
         for lang in LayoutSwitcher.pairLanguages() { _ = FrequencyPacks.pack(for: lang) }   // ~10 мс на пак
         _ = isValidWord("тест", lang: "ru")
         _ = isValidWord("test", lang: "en")
+        didWarmUp = true
     }
 
     /// Годится ли слово как результат конверсии: системный словарь или скачанный частотный

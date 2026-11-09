@@ -49,7 +49,7 @@ struct ClipboardHistoryShortcut: Codable, Equatable {
 
 @MainActor
 final class ClipboardHistory {
-    private static let limit = 30
+    static let limit = 30
     private static let maxTextBytes = 32 * 1024
     private static let shortcutID = EventHotKeyID(signature: 0x4E534348, id: 1) // NSCH
     private static let ignoredTypes = [

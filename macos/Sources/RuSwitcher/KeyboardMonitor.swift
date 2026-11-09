@@ -74,8 +74,20 @@ final class KeyboardMonitor: @unchecked Sendable {
 
     private var onAltTap: (() -> Void)?
     private var onAltReconvert: (() -> Void)?
-    /// Авто-конвертация: вызывается (async) на границе слова, когда включён autoConvert.
-    var onWordBoundary: (() -> Void)?
+    /// With an active local tap, the poster inserts the edit before the physical space.
+    /// A nil poster is the deferred path for remote input or a passive tap.
+    var onWordBoundary: ((((CGEvent) -> Void)?) -> Void)?
+    private var boundaryGeneration = 0
+    private var wordAppPID: pid_t?
+    private var orderedSpaceEnabled = false
+
+    private static var wantsOrderedSpace: Bool {
+        let settings = SettingsManager.shared
+        return settings.autoSwitchEnabled && settings.autoConvert && settings.wordEndOnSpace
+            && !settings.remoteDesktopMode
+    }
+
+    var needsSpaceTapReconfigure: Bool { isRunning && orderedSpaceEnabled != Self.wantsOrderedSpace }
     /// 3.5.0b: Enter/Tab на конце слова — синхронно из колбэка tap'а. true — клавиша
     /// придержана: приложение перепечатает слово и отправит её само (TextConverter.replaceTail).
     var onWordEndSync: ((WordEndKey, [TypedKey], UInt16, CGEventFlags) -> Bool)?
@@ -147,9 +159,9 @@ final class KeyboardMonitor: @unchecked Sendable {
 
         // Caps Lock и придержка Enter/Tab требуют активного tap (consume): подавить
         // переключение регистра / придержать клавишу. Иначе listenOnly — не вмешиваемся в ввод.
-        let options: CGEventTapOptions = (triggerConfig.isCapsLock || interceptBoundaryKeys) ? .defaultTap : .listenOnly
-        tapIsActive = options == .defaultTap
-        rslog("Tap options: \(options == .defaultTap ? "default" : "listenOnly") intercept=\(interceptBoundaryKeys)")
+        let requiresActiveTap = triggerConfig.isCapsLock || interceptBoundaryKeys
+        orderedSpaceEnabled = Self.wantsOrderedSpace
+        var options: CGEventTapOptions = (requiresActiveTap || orderedSpaceEnabled) ? .defaultTap : .listenOnly
 
         func createTap(at location: CGEventTapLocation) -> CFMachPort? {
             // Quartz can silently strip keyboard events from a mixed keyboard/mouse mask.
@@ -178,11 +190,22 @@ final class KeyboardMonitor: @unchecked Sendable {
             keyboardTap = createTap(at: tapLocation)
         }
 
+        // Space ordering is optional when macOS only permits passive monitoring.
+        if keyboardTap == nil, orderedSpaceEnabled, !requiresActiveTap {
+            options = .listenOnly
+            tapLocation = .cgSessionEventTap
+            keyboardTap = createTap(at: tapLocation)
+            if keyboardTap == nil {
+                tapLocation = .cghidEventTap
+                keyboardTap = createTap(at: tapLocation)
+            }
+        }
         guard let tap = keyboardTap else {
             rslog("FAILED to create event tap - no permission")
             return false
         }
 
+        tapIsActive = options == .defaultTap
         eventTap = tap
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -193,6 +216,7 @@ final class KeyboardMonitor: @unchecked Sendable {
     }
 
     func stop() {
+        fullReset()
         tapIsActive = false
         suspendDepth = 0
         if let tap = eventTap {
@@ -241,13 +265,24 @@ final class KeyboardMonitor: @unchecked Sendable {
         lineKeys = []
     }
 
-    /// Завершилось слово на пробеле — если включён хоть один шаг конвейера (автоконверсия,
-    /// автозамена, правка), дёргаем авто-путь (async, чтобы не блокировать доставку события).
-    private func fireWordBoundary() {
-        let s = SettingsManager.shared
-        guard s.wordEndOnSpace, s.wordEndPipelineActive else { return }
-        let cb = onWordBoundary
-        DispatchQueue.main.async { cb?() }
+    private func fireWordBoundary(postBeforeSpace: ((CGEvent) -> Void)?) {
+        boundaryGeneration &+= 1
+        let settings = SettingsManager.shared
+        guard settings.wordEndOnSpace, settings.wordEndPipelineActive else { return }
+        if orderedSpaceEnabled, let postBeforeSpace {
+            onWordBoundary?(postBeforeSpace)
+        } else {
+            deferWordBoundary()
+        }
+    }
+
+    func deferWordBoundary() {
+        let generation = boundaryGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.boundaryGeneration == generation,
+                  self.boundaryCount > 0, !self.prevWordKeys.isEmpty else { return }
+            self.onWordBoundary?(nil)
+        }
     }
 
     /// 3.5.0b: Enter/Tab на конце слова. Зовётся из колбэка tap'а ДО handleKeyDown.
@@ -326,7 +361,8 @@ final class KeyboardMonitor: @unchecked Sendable {
 
     // MARK: - Event Handling
 
-    fileprivate func handleKeyDown(keyCode: UInt16, flags: CGEventFlags, char: Character? = nil) {
+    fileprivate func handleKeyDown(keyCode: UInt16, flags: CGEventFlags, char: Character? = nil,
+                                   postBeforeSpace: ((CGEvent) -> Void)? = nil) {
         if !receivedKeyDown {
             receivedKeyDown = true
             rslog("Keyboard event tap received its first keyDown")
@@ -361,18 +397,11 @@ final class KeyboardMonitor: @unchecked Sendable {
 
         // Пробел — единственная граница через которую можно вернуться
         if keyCode == KC.space {
-            if currentWordLength > 0 {
-                wordBeforeBoundaryLength = currentWordLength
-                boundaryCount = 1
-                prevWordKeys = currentWordKeys
-                prevWordBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-                fireWordBoundary()
-            } else {
-                boundaryCount += 1
+            if !flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty {
+                fullReset()
+                return
             }
-            currentWordLength = 0
-            currentWordKeys = []
-            if !lineKeys.isEmpty { lineKeys.append(TypedKey(keyCode: KC.space, shift: false, caps: false, char: " ")) }  // #24: пробел в буфер строки (не ведущий)
+            finishWord(postBeforeSpace: postBeforeSpace)
             return
         }
 
@@ -408,6 +437,9 @@ final class KeyboardMonitor: @unchecked Sendable {
         }
 
         if KeyMapping.keycodeToEN[keyCode] != nil {
+            if orderedSpaceEnabled, currentWordLength == 0 {
+                wordAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            }
             let tk = TypedKey(keyCode: keyCode, shift: flags.contains(.maskShift), caps: flags.contains(.maskAlphaShift))
             currentWordKeys.append(tk)
             lineKeys.append(tk)   // #24: буква в буфер строки
@@ -422,24 +454,36 @@ final class KeyboardMonitor: @unchecked Sendable {
         }
     }
 
+    private func finishWord(postBeforeSpace: ((CGEvent) -> Void)?) {
+        let hasWord = currentWordLength > 0
+        if hasWord {
+            wordBeforeBoundaryLength = currentWordLength
+            boundaryCount = 1
+            prevWordKeys = currentWordKeys
+            let app = NSWorkspace.shared.frontmostApplication
+            prevWordBundleID = app?.bundleIdentifier
+            if postBeforeSpace != nil, wordAppPID != app?.processIdentifier {
+                fullReset()
+                return
+            }
+        } else {
+            boundaryCount += 1
+        }
+        currentWordLength = 0
+        currentWordKeys = []
+        if !lineKeys.isEmpty {
+            lineKeys.append(TypedKey(keyCode: KC.space, shift: false, caps: false, char: " "))
+        }
+        if hasWord { fireWordBoundary(postBeforeSpace: postBeforeSpace) }
+    }
+
     /// Обработка символа, проброшенного через удалённый стол (keyCode 0 + юникод).
     /// Работаем по самому символу: пробел — граница слова, backspace — откат,
     /// буква — кладём реальный символ в буфер (конверсия пойдёт по нему, см. convertKeys).
     private func handleForwardedChar(_ ch: Character) {
         // Пробел — граница слова (как локальный keyCode space)
         if ch == " " {
-            if currentWordLength > 0 {
-                wordBeforeBoundaryLength = currentWordLength
-                boundaryCount = 1
-                prevWordKeys = currentWordKeys
-                prevWordBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-                fireWordBoundary()
-            } else {
-                boundaryCount += 1
-            }
-            currentWordLength = 0
-            currentWordKeys = []
-            if !lineKeys.isEmpty { lineKeys.append(TypedKey(keyCode: KC.space, shift: false, caps: false, char: " ")) }  // #24
+            finishWord(postBeforeSpace: nil)
             return
         }
         // Перенос строки / таб — полный сброс
@@ -619,6 +663,7 @@ private func keyboardCallback(
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
         if let userInfo {
             let monitor = Unmanaged<KeyboardMonitor>.fromOpaque(userInfo).takeUnretainedValue()
+            monitor.resetInputTracking()
             if let tap = monitor.eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
@@ -666,7 +711,11 @@ private func keyboardCallback(
                 }
             }
         }
-        monitor.handleKeyDown(keyCode: keyCode, flags: event.flags, char: forwardedChar)
+        // Events inserted through this proxy reach the app before the original space.
+        let poster: ((CGEvent) -> Void)? = keyCode == KC.space && monitor.tapIsActive && !remote
+            ? { $0.tapPostEvent(proxy) } : nil
+        monitor.handleKeyDown(keyCode: keyCode, flags: event.flags, char: forwardedChar,
+                              postBeforeSpace: poster)
     } else if type == .flagsChanged {
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         if monitor.handleFlagsChanged(flags: event.flags, keyCode: keyCode) {

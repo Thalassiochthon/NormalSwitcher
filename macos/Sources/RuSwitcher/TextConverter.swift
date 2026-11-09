@@ -59,7 +59,7 @@ final class TextConverter {
     }
 
     /// Создаёт CGEventSource с маркером, чтобы KeyboardMonitor игнорировал наши события
-    nonisolated private func makeSource() -> CGEventSource? {
+    nonisolated private static func makeSource() -> CGEventSource? {
         let source = CGEventSource(stateID: .hidSystemState)
         source?.userData = kRuSwitcherEventMarker
         return source
@@ -235,6 +235,94 @@ final class TextConverter {
         return true
     }
 
+    /// Prepare the entire edit before sending any events through the active tap.
+    /// The caller still returns the original space, so its keyDown and keyUp are preserved.
+    func replaceBeforeSpace(original: String, insert: String, deleteCount: Int, switchesLayout: Bool,
+                            app: NSRunningApplication, layoutID: String, deadline: TimeInterval,
+                            post: (CGEvent) -> Void) -> Bool {
+        guard !isConverting, original.count == deleteCount,
+              let focus = focusedElement(app: app, timeout: 0.012),
+              let role = focusedRole(of: focus), !Self.nonTextRoles.contains(role) else { return false }
+        var subrole: AnyObject?
+        if AXUIElementCopyAttributeValue(focus, kAXSubroleAttribute as CFString, &subrole) == .success,
+           subrole as? String == (kAXSecureTextFieldSubrole as String) { return false }
+
+        // A selection can be inline completion, or the user may have moved the caret.
+        // Leave either alone when we cannot establish a plain insertion point.
+        var selection: AnyObject?
+        guard AXUIElementCopyAttributeValue(focus, kAXSelectedTextRangeAttribute as CFString, &selection) == .success,
+              let selection, CFGetTypeID(selection) == AXValueGetTypeID() else { return false }
+        var caret = CFRange()
+        guard AXValueGetValue(selection as! AXValue, .cfRange, &caret),
+              caret.length == 0, caret.location >= original.utf16.count else { return false }
+
+        // Read only the suffix we are about to replace. If the app supports this attribute,
+        // reject a mismatched suffix (for example after programmatic focus or caret changes).
+        var range = CFRange(location: caret.location - original.utf16.count, length: original.utf16.count)
+        if let parameter = AXValueCreate(.cfRange, &range) {
+            var suffix: AnyObject?
+            let result = AXUIElementCopyParameterizedAttributeValue(
+                focus, kAXStringForRangeParameterizedAttribute as CFString, parameter, &suffix
+            )
+            if result == .success, suffix as? String != original { return false }
+        }
+
+        let normalized = Self.normalizedForInsert(insert)
+        // When replacing all the text in a browser editor, avoid making the field briefly
+        // empty. Keep the existing backspace path for native fields, terminals and RTL.
+        let bySelection = range.location == 0 && AutoSwitchPolicy.isBrowser(app.bundleIdentifier)
+            && !Self.containsRTL(original) && !Self.containsRTL(normalized)
+            && focusInWebContent(from: focus, timeout: 0.012)
+        guard let events = Self.orderedReplacementEvents(deleteCount: deleteCount, insert: normalized,
+                                                          bySelection: bySelection),
+              let currentFocus = focusedElement(app: app, timeout: 0.012), CFEqual(currentFocus, focus),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
+              !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentLayoutID() == layoutID,
+              ProcessInfo.processInfo.systemUptime < deadline else { return false }
+
+        lastOriginal = original + " "
+        lastConverted = normalized + " "
+        lastWasBuffer = true
+        lastUndoSwitchesLayout = switchesLayout
+        events.forEach(post)
+        return true
+    }
+
+    enum ReplacementStroke: Equatable {
+        case key(UInt16, CGEventFlags)
+        case text(String)
+    }
+
+    nonisolated static func orderedReplacementStrokes(deleteCount: Int, insert: String,
+                                                       bySelection: Bool) -> [ReplacementStroke]? {
+        guard (1...64).contains(deleteCount), !insert.isEmpty, insert.utf16.count <= 512 else { return nil }
+        let deletion: ReplacementStroke = bySelection ? .key(KC.left, .maskShift) : .key(KC.backspace, [])
+        let limit = insert.utf16.count > perCharInsertLimit ? 20 : 1
+        return Array(repeating: deletion, count: deleteCount)
+            + insertChunks(insert, limit: limit).map(ReplacementStroke.text)
+    }
+
+    nonisolated private static func orderedReplacementEvents(deleteCount: Int, insert: String,
+                                                              bySelection: Bool) -> [CGEvent]? {
+        guard let strokes = orderedReplacementStrokes(deleteCount: deleteCount, insert: insert,
+                                                      bySelection: bySelection),
+              let source = makeSource() else { return nil }
+        var events: [CGEvent] = []
+        for stroke in strokes {
+            let pair: (CGEvent, CGEvent)?
+            switch stroke {
+            case .key(let key, let flags):
+                pair = keyEvents(source: source, keyCode: key, flags: flags)
+            case .text(let chunk):
+                pair = textEvents(source: source, chunk: chunk)
+            }
+            guard let (down, up) = pair else { return nil }
+            events.append(down)
+            events.append(up)
+        }
+        return events
+    }
+
     /// issue #24: конвертировать всю набранную строку (от курсора до начала строки) без
     /// выделения мышью. Сами выделяем Shift+Cmd+← и прогоняем через путь выделения (умная
     /// конверсия починит только слова не в той раскладке, верные — оставит). При no-op/сбое
@@ -289,21 +377,25 @@ final class TextConverter {
     }
 
     /// Фокусный элемент фронтмост-приложения (nil — AX недоступен).
-    private func focusedElement() -> AXUIElement? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+    private func focusedElement(app: NSRunningApplication? = nil, timeout: Float = 0.25) -> AXUIElement? {
+        guard let app = app ?? NSWorkspace.shared.frontmostApplication else { return nil }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(axApp, 0.25)
+        AXUIElementSetMessagingTimeout(axApp, timeout)
         var focusedRaw: AnyObject?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focusedRaw) == .success,
               let focused = focusedRaw else { return nil }
         let element = focused as! AXUIElement
-        AXUIElementSetMessagingTimeout(element, 0.25)   // ревью M5: запросы идут к элементу, не к приложению
+        AXUIElementSetMessagingTimeout(element, timeout)
         return element
     }
 
     /// 3.5.0b (ревью M7): роль сфокусированного элемента — только если AX её отдал.
     private func focusedRole() -> String? {
         guard let element = focusedElement() else { return nil }
+        return focusedRole(of: element)
+    }
+
+    private func focusedRole(of element: AXUIElement) -> String? {
         var roleRaw: AnyObject?
         guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRaw) == .success else { return nil }
         return roleRaw as? String
@@ -874,7 +966,8 @@ final class TextConverter {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(axApp, 0.25)
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        guard frontmostAppHasFocus(), erasingEmptiesField(count), focusInWebContent() else { return false }
+        guard frontmostAppHasFocus(), erasingEmptiesField(count),
+              let focus = focusedElement(), focusInWebContent(from: focus) else { return false }
         if let pair = LayoutSwitcher.currentAndOppositeLanguage(),
            LayoutDetector.isHebrew(pair.current) || LayoutDetector.isHebrew(pair.opposite) { return false }
         rslog("erase: by selection")
@@ -898,9 +991,9 @@ final class TextConverter {
     private var lastOriginalIsRTL: Bool { TextConverter.containsRTL(lastOriginal) || TextConverter.containsRTL(lastConverted) }
 
     /// Фокус внутри веб-страницы: среди предков есть AXWebArea. Глубина страниц бывает большой.
-    private func focusInWebContent() -> Bool {
-        guard var element = focusedElement() else { return false }
-        let deadline = Date().addingTimeInterval(0.05)   // путь Enter идёт из колбэка tap'а
+    private func focusInWebContent(from focus: AXUIElement, timeout: Float = 0.25) -> Bool {
+        var element = focus
+        let deadline = Date().addingTimeInterval(0.05)
         for _ in 0..<64 {
             guard Date() < deadline else { return false }
             var roleRaw: AnyObject?
@@ -910,7 +1003,7 @@ final class TextConverter {
             guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
                   let next = parent else { return false }
             element = next as! AXUIElement
-            AXUIElementSetMessagingTimeout(element, 0.25)
+            AXUIElementSetMessagingTimeout(element, timeout)
         }
         return false
     }
@@ -936,23 +1029,24 @@ final class TextConverter {
     /// поэтому длинный текст (расшифровка автозамены, до 500 знаков) идёт кусками по 20 UTF-16,
     /// больше один CGEvent не несёт. wholeWord — вставить одним нажатием поверх выделения.
     nonisolated private func insertText(_ text: String, wholeWord: Bool = false) {
-        guard let source = makeSource() else { return }
+        guard let source = Self.makeSource() else { return }
         let limit = wholeWord || text.utf16.count > Self.perCharInsertLimit ? 20 : 1
         let chunks = insertChunks(text, limit: limit)
         for (i, chunk) in chunks.enumerated() {
-            let utf16 = Array(chunk.utf16)
-            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
-            utf16.withUnsafeBufferPointer { buf in
-                down.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
-                up.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
-            }
-            down.flags = []   // иначе событие унаследует Shift от только что посланного Shift+←
-            up.flags = []
+            guard let (down, up) = Self.textEvents(source: source, chunk: chunk) else { return }
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
             if i < chunks.count - 1 { usleep(1_000) }
         }
+    }
+
+    nonisolated private static func textEvents(source: CGEventSource, chunk: String) -> (CGEvent, CGEvent)? {
+        guard let (down, up) = keyEvents(source: source, keyCode: 0, flags: []) else { return nil }
+        Array(chunk.utf16).withUnsafeBufferPointer { buf in
+            down.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+            up.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+        }
+        return (down, up)
     }
 
     /// Вставляет текст через Cmd+V и ждёт завершения
@@ -1129,14 +1223,8 @@ final class TextConverter {
 
     /// Симулирует нажатие клавиши с маркером (чтобы наш monitor игнорировал)
     nonisolated private func simKey(keyCode: UInt16, flags: CGEventFlags, target: pid_t? = nil) {
-        guard let source = makeSource() else { return }
-
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
-        else { return }
-
-        keyDown.flags = flags
-        keyUp.flags = flags
+        guard let source = Self.makeSource(),
+              let (keyDown, keyUp) = Self.keyEvents(source: source, keyCode: keyCode, flags: flags) else { return }
 
         if let target {
             keyDown.postToPid(target)
@@ -1145,5 +1233,14 @@ final class TextConverter {
             keyDown.post(tap: .cghidEventTap)
             keyUp.post(tap: .cghidEventTap)
         }
+    }
+
+    nonisolated private static func keyEvents(source: CGEventSource, keyCode: UInt16,
+                                              flags: CGEventFlags) -> (CGEvent, CGEvent)? {
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else { return nil }
+        down.flags = flags
+        up.flags = flags
+        return (down, up)
     }
 }
