@@ -1,0 +1,32 @@
+name: Publish NormalSwitcher for macOS
+on:
+  push:
+    branches: [personal]
+    paths: [.github/workflows/macos-release.yml]
+permissions:
+  contents: write
+concurrency:
+  group: normalswitcher-macos-release
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      RELEASE_VERSION: '3.5.1'
+      RELEASE_BUILD: '63'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify the application
+        run: |
+          set -euo pipefail
+          export RS_VERSION_JSON="$RUNNER_TEMP/normalswitcher-version.json"
+          python3 -c 'import json, os, sys; json.dump(dict(version=os.environ["RELEASE_VERSION"], build=os.environ["RELEASE_BUILD"]), sys.stdout)' > "$RS_VERSION_JSON"
+          bash macos/build_app.sh
+          codesign --verify --deep --strict macos/NormalSwitcher.app
+      - name: Package and publish
+        run: |
+          set -euo pipefail
+          asset="NormalSwitcher-$RELEASE_VERSION.dmg"
+          hdiutil create -volname NormalSwitcher -srcfolder macos/NormalSwitcher.app -format UDZO "$asset"
+          hdiutil verify "$asset"
+          gh release create "v$RELEASE_VERSION" "$asset" --target "$GITHUB_SHA" --title "NormalSwitcher $RELEASE_VERSION" --notes "Flat menu bar flags, simpler menus, and more reliable pasting from clipboard history. This build requires one manual installation from the disk image."
