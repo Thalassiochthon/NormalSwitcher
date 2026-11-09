@@ -47,6 +47,7 @@ final class KeyboardMonitor: @unchecked Sendable {
     fileprivate var eventTap: CFMachPort?
     var isRunning: Bool { eventTap != nil }
     private var runLoopSource: CFRunLoopSource?
+    private var receivedKeyDown = false
 
     /// Длина текущего набираемого слова
     private(set) var currentWordLength = 0
@@ -121,6 +122,7 @@ final class KeyboardMonitor: @unchecked Sendable {
     ) -> Bool {
         self.onAltTap = onAltTap
         self.onAltReconvert = onAltReconvert
+        receivedKeyDown = false
 
         triggerConfig = TriggerConfig.current()
         detectors = [:]
@@ -135,8 +137,9 @@ final class KeyboardMonitor: @unchecked Sendable {
         let settings = SettingsManager.shared
         interceptBoundaryKeys = settings.wordEndOnEnter || settings.wordEndOnTab
         heldKeyUp = nil
+        let keyDownMask: CGEventMask = 1 << CGEventType.keyDown.rawValue
         var mask: CGEventMask =
-            (1 << CGEventType.keyDown.rawValue)
+            keyDownMask
             | (1 << CGEventType.flagsChanged.rawValue)
             | (1 << CGEventType.leftMouseDown.rawValue)
             | (1 << CGEventType.rightMouseDown.rawValue)
@@ -148,22 +151,31 @@ final class KeyboardMonitor: @unchecked Sendable {
         tapIsActive = options == .defaultTap
         rslog("Tap options: \(options == .defaultTap ? "default" : "listenOnly") intercept=\(interceptBoundaryKeys)")
 
-        // Режим удалённого стола: session-уровень видит проброшенные Screen Sharing
-        // нажатия (они инжектятся через CGEventPost, а HID-tap их не видит).
-        let tapLocation: CGEventTapLocation =
-            SettingsManager.shared.remoteDesktopMode ? .cgSessionEventTap : .cghidEventTap
-        rslog("Tap location: \(SettingsManager.shared.remoteDesktopMode ? "session (remote desktop)" : "hid")")
-
         func createTap(at location: CGEventTapLocation) -> CFMachPort? {
-            CGEvent.tapCreate(tap: location, place: .tailAppendEventTap, options: options,
-                              eventsOfInterest: mask, callback: keyboardCallback,
-                              userInfo: Unmanaged.passUnretained(self).toOpaque())
+            // Quartz can silently strip keyboard events from a mixed keyboard/mouse mask.
+            // With no listening grant, test keyDown alone before accepting the mixed tap.
+            if !CGPreflightListenEventAccess() {
+                guard let probe = CGEvent.tapCreate(tap: location, place: .tailAppendEventTap,
+                                                   options: options, eventsOfInterest: keyDownMask,
+                                                   callback: keyboardCallback, userInfo: nil) else {
+                    rslog("Keyboard event tap refused keyDown events")
+                    return nil
+                }
+                CFMachPortInvalidate(probe)
+            }
+            return CGEvent.tapCreate(tap: location, place: .tailAppendEventTap, options: options,
+                                     eventsOfInterest: mask, callback: keyboardCallback,
+                                     userInfo: Unmanaged.passUnretained(self).toOpaque())
         }
 
+        // Observe events in the logged-in session, including input from remappers
+        // and Screen Sharing that may bypass the hardware event stream.
+        var tapLocation = CGEventTapLocation.cgSessionEventTap
         var keyboardTap = createTap(at: tapLocation)
-        if keyboardTap == nil, tapLocation == .cghidEventTap {
-            rslog("HID event tap unavailable; trying the session event tap")
-            keyboardTap = createTap(at: .cgSessionEventTap)
+        if keyboardTap == nil, !settings.remoteDesktopMode {
+            rslog("Session event tap unavailable; trying the HID event tap")
+            tapLocation = .cghidEventTap
+            keyboardTap = createTap(at: tapLocation)
         }
 
         guard let tap = keyboardTap else {
@@ -176,7 +188,7 @@ final class KeyboardMonitor: @unchecked Sendable {
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
-        rslog("Event tap created and enabled successfully")
+        rslog("Event tap created and enabled successfully (\(tapLocation == .cgSessionEventTap ? "session" : "hid"))")
         return true
     }
 
@@ -315,6 +327,10 @@ final class KeyboardMonitor: @unchecked Sendable {
     // MARK: - Event Handling
 
     fileprivate func handleKeyDown(keyCode: UInt16, flags: CGEventFlags, char: Character? = nil) {
+        if !receivedKeyDown {
+            receivedKeyDown = true
+            rslog("Keyboard event tap received its first keyDown")
+        }
         // На части клавиатур Глобус шлёт и keyDown (179): это не печать, хоткей Fn он сбивать
         // не должен (ревью #38).
         if keyCode == KC.globeKeyDown { return }
