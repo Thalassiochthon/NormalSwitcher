@@ -999,7 +999,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(settings)
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: L10n.settingsQuit, action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: L10n.menuQuit, action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
