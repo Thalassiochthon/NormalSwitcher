@@ -2,44 +2,69 @@ name: Publish NormalSwitcher for macOS
 on:
   push:
     branches: [personal]
-    paths: [.github/workflows/macos-release.yml]
+    paths: [release/macos.json]
 permissions:
   contents: write
 concurrency:
   group: normalswitcher-macos-release
-  cancel-in-progress: true
 jobs:
   release:
     runs-on: macos-15
-    env:
-      RELEASE_VERSION: '3.5.1'
-      RELEASE_BUILD: '63'
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build and verify the application
+      - name: Verify and publish the signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          export RS_VERSION_JSON="$RUNNER_TEMP/normalswitcher-version.json"
-          python3 -c 'import json, os, sys; json.dump(dict(version=os.environ["RELEASE_VERSION"], build=os.environ["RELEASE_BUILD"]), sys.stdout)' > "$RS_VERSION_JSON"
-          bash macos/build_app.sh
-          codesign --verify --deep --strict macos/NormalSwitcher.app
-      - name: Package and publish
-        run: |
-          set -euo pipefail
-          asset="NormalSwitcher-$RELEASE_VERSION.dmg"
-          staging="$RUNNER_TEMP/normalswitcher-dmg"
-          mkdir -p "$staging"
-          ditto macos/NormalSwitcher.app "$staging/NormalSwitcher.app"
-          ln -s /Applications "$staging/Applications"
-          hdiutil create -volname NormalSwitcher -srcfolder "$staging" -format UDZO "$asset"
-          hdiutil verify "$asset"
-          mountpoint="$RUNNER_TEMP/normalswitcher-mount"
-          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$asset"
-          trap 'hdiutil detach "$mountpoint" -quiet' EXIT
-          codesign --verify --deep --strict "$mountpoint/NormalSwitcher.app"
-          if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
-            gh release upload "v$RELEASE_VERSION" "$asset" --clobber
+          manifest=release/macos.json
+          version=$(jq -er '.version | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' "$manifest")
+          tag="v$version"
+          asset="NormalSwitcher-$version.dmg"
+          archive="$RUNNER_TEMP/NormalSwitcher.zip"
+          if release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null); then
+            test "$(jq -r '.target_commitish' <<< "$release")" = "$GITHUB_SHA"
+          else
+            : > "$archive"
+            for blob in $(jq -er '.blobs[] | select(test("^[a-f0-9]{40}$"))' "$manifest"); do
+              gh api "repos/$GITHUB_REPOSITORY/git/blobs/$blob" --jq .content | base64 -D >> "$archive"
+            done
+            expected=$(jq -er '.zip_sha256 | select(test("^[a-f0-9]{64}$"))' "$manifest")
+            printf '%s  %s\n' "$expected" "$archive" | shasum -a 256 -c -
+            staging="$RUNNER_TEMP/normalswitcher-dmg"
+            mkdir -p "$staging"
+            ditto -x -k "$archive" "$staging"
+            app="$staging/NormalSwitcher.app"
+            requirement='anchor apple generic and certificate leaf[subject.OU] = "HDFDUW2PQ7"'
+            codesign --verify --deep --strict -R="$requirement" "$app"
+            plist="$app/Contents/Info.plist"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = com.antonjas.normalswitcher
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")" = "$version"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" = "$(jq -er .build "$manifest")"
+            ln -s /Applications "$staging/Applications"
+            hdiutil create -volname NormalSwitcher -srcfolder "$staging" -format UDZO "$asset"
+            hdiutil verify "$asset"
+            mountpoint="$RUNNER_TEMP/normalswitcher-mount"
+            hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$asset"
+            trap 'hdiutil detach "$mountpoint" -quiet' EXIT
+            codesign --verify --deep --strict -R="$requirement" "$mountpoint/NormalSwitcher.app"
+            gh release create "$tag" "$asset" --target "$GITHUB_SHA" \
+              --title "NormalSwitcher $version" --notes "$(jq -er .notes "$manifest")"
+            release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")
+          fi
+          digest=$(jq -er --arg asset "$asset" '.assets[] | select(.name == $asset and .state == "uploaded") | .digest | select(test("^sha256:[a-f0-9]{64}$"))' <<< "$release")
+          jq --arg url "$(jq -r .html_url <<< "$release")" --arg sha "${digest#sha256:}" \
+            '{version,build,dev:"",url:$url,notes} + (if .manual_migration then {} else {sha256:$sha} end)' \
+            "$manifest" > "$RUNNER_TEMP/update-feed.json"
+          feed="repos/$GITHUB_REPOSITORY/contents/version.json"
+          current=$(gh api "$feed?ref=personal")
+          current_version=$(jq -r .content <<< "$current" | base64 -D | jq -er .version)
+          if [[ "$current_version" == "$version" ]]; then
+            diff -u <(jq -r .content <<< "$current" | base64 -D | jq -S .) <(jq -S . "$RUNNER_TEMP/update-feed.json")
             exit 0
           fi
-          gh release create "v$RELEASE_VERSION" "$asset" --target "$GITHUB_SHA" --title "NormalSwitcher $RELEASE_VERSION" --notes "Flat menu bar flags, simpler menus, and more reliable pasting from clipboard history. This build requires one manual installation from the disk image."
+          python3 -c 'import sys; a,b=(tuple(map(int, v.split("."))) for v in sys.argv[1:]); sys.exit(a >= b)' "$current_version" "$version"
+          jq -n --arg sha "$(jq -r .sha <<< "$current")" \
+            --arg content "$(base64 < "$RUNNER_TEMP/update-feed.json" | tr -d '\n')" \
+            --arg message "Announce NormalSwitcher $version to installed apps" \
+            '{branch:"personal",$sha,$content,$message}' | gh api --method PUT "$feed" --input - --silent

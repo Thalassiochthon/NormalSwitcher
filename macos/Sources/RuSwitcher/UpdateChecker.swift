@@ -17,7 +17,9 @@ enum UpdateChecker {
         let sha256: String?
     }
 
-    /// Проверить при запуске (с задержкой 5 сек, не чаще раза в сутки).
+    private static let minimumAutomaticCheckInterval: TimeInterval = 3600
+
+    /// Проверить при запуске (с задержкой 5 сек, не чаще раза в час).
     /// Отключается через настройку `checkUpdatesEnabled`. Ручная проверка (`checkNow`) работает всегда.
     static func checkOnLaunch() {
         guard shouldAutoCheck() else { return }
@@ -34,13 +36,13 @@ enum UpdateChecker {
         Task { await check(silent: true) }
     }
 
-    /// Можно ли сейчас авто-проверять: включено в настройках И прошло ≥24ч с последней проверки.
+    /// Можно ли сейчас авто-проверять: включено в настройках И прошёл минимум час с последней проверки.
     private static func shouldAutoCheck() -> Bool {
         let settings = SettingsManager.shared
         guard settings.checkUpdatesEnabled else { return false }
         if let lastCheck = settings.lastUpdateCheck,
-           Date().timeIntervalSince(lastCheck) < 86400 {
-            return false // Проверяли менее суток назад
+           Date().timeIntervalSince(lastCheck) < minimumAutomaticCheckInterval {
+            return false // Проверяли менее часа назад
         }
         return true
     }
@@ -242,9 +244,9 @@ enum UpdateChecker {
 
         // 5. ПРОВЕРКА ПОДПИСИ: единственная реальная защита от подмены кода.
         //    sha256 защищает лишь от битой загрузки — если подменить и DMG, и хэш,
-        //    спасает только пиннинг Developer ID нашей команды.
-        guard verifyNotarizedSignature(at: sourceApp.path) else {
-            rslog("Update: signature/notarization check FAILED — aborting")
+        //    спасает только пиннинг сертификатом Apple нашей команды.
+        guard verifyReleaseSignature(at: sourceApp.path) else {
+            rslog("Update: release signature check FAILED — aborting")
             await showInstallError(L10n.updateIntegrityFailed)
             return
         }
@@ -324,9 +326,9 @@ enum UpdateChecker {
         detach.waitUntilExit()
     }
 
-    /// Проверяет, что бандл подписан Developer ID нашей команды и проходит строгую
+    /// Проверяет, что бандл подписан сертификатом Apple нашей команды и проходит строгую
     /// проверку целостности (codesign --verify с пиннингом Team ID).
-    private static func verifyNotarizedSignature(at path: String) -> Bool {
+    private static func verifyReleaseSignature(at path: String) -> Bool {
         let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(SettingsManager.developerTeamID)\""
         let process = Process()
         process.launchPath = "/usr/bin/codesign"

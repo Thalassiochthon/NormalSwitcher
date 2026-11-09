@@ -1,0 +1,22 @@
+{
+  "version": "3.5.2",
+  "build": "64",
+  "manual_migration": true,
+  "notes": "Переход на канал обновлений NormalSwitcher. Версию 3.5.2 нужно один раз установить вручную из DMG. Последующие подписанные релизы будут доступны через встроенное обновление. Улучшена вставка из истории буфера обмена.\n\nOne-time migration to NormalSwitcher’s signed update channel. Install 3.5.2 manually from the DMG once. Subsequent signed releases can be installed in the app. Clipboard history paste has also been improved.",
+  "zip_sha256": "afef044b5810b119364e3495ba3bdc1bf83e5cb6257b851365151956e586740f",
+  "blobs": [
+    "7e851cb6020dde9eb78fcbf460710f0c22ed8cc2",
+    "3a199707173eaf63d851656cb07cced417f50455",
+    "b75f2eded8419dc7b663383b65ef674a3312cc40",
+    "7e535ff043f2c4ef2feeb23139e40bffdd747aed",
+    "599ee81102d55435c8a7a28248da15f0cbcad60d",
+    "779560a08a6a7c47a0e005086b318b85131bf665",
+    "240caf651472da8eb16686c4c8705485fd2807ad",
+    "f10a1e5733c2eb22d253e9cf4cc30d0c7b2b7352",
+    "5920ab07b5292603287b7110714c6a7d05286714",
+    "078c27707e8db08edf1134b0568a292178b6e157",
+    "1f87e852f5581dbe7a8b150f7c73a042044417fb",
+    "261caf5c6b18ca167c49d887d92b60f1d7421653",
+    "a0f4e9771cef75746d6cec8e568380e9ce89ab76"
+  ]
+}
