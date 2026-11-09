@@ -1,8 +1,8 @@
 {
-  "version": "1.0.0",
-  "build": "65",
+  "version": "1.0.1",
+  "build": "66",
   "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.0.0",
-  "notes": "Первый релиз с собственной нумерацией NormalSwitcher. При переходе с 3.x один раз замените приложение вручную из DMG. Следующие версии доступны через встроенное обновление. В сборку входят плоские флаги, упрощённые настройки и исправление вставки из истории буфера.\n\nThe first release in NormalSwitcher’s independent version line. Replace 3.x manually once using the DMG. Future versions are available via the in-app updater. This release includes flat flags, simplified settings and a clipboard history paste fix.",
-  "sha256": "060a0ddb171a9fc2a23a0b044c17dfc826b1e3c50baf3fa346ac01512388ff6e"
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.0.1",
+  "notes": "Перехват клавиатуры теперь начинается на уровне пользовательской сессии macOS. Это исправляет сценарий, когда подключение считалось успешным, но автоконверсия не получала нажатия. Улучшена проверка доступа к клавиатуре. При включённой отладке журнал подтверждает первое полученное нажатие без записи его содержимого.\n\nKeyboard monitoring now starts at the macOS session tap. Permission checks distinguish keyboard access from mouse-only monitoring, and debug logging confirms the first keyboard event without recording its content.",
+  "sha256": "e50ebf79618ca66933086e2dd08e30a951cb6926ba51fe33a2c2d3bb1ee5bf9a"
 }
