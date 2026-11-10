@@ -15,6 +15,7 @@ internal sealed class TrayIcon : IDisposable
     private const uint ID_SETTINGS = 14;
     private const uint ID_AUTO = 15;
     private const uint ID_UPDATE = 16;
+    private const uint ID_TASKS = 18;
     private const uint ID_CLIPBOARD = 17;
     private const uint ID_LAYOUT_FIRST = 100;
 
@@ -33,6 +34,8 @@ internal sealed class TrayIcon : IDisposable
     private bool _enabled = Settings.Current.KeyboardEnabled;
 
     public GlobalShortcuts Shortcuts { get; private set; } = null!;
+    public Func<string>? AutoStatus { get; set; }
+    public event Action? TasksRequested;
     public ClipboardHistory ClipboardHistory { get; private set; } = null!;
     public event Action<string>? Diagnostic;
     public event Action<bool>? EnabledChanged;
@@ -243,6 +246,9 @@ internal sealed class TrayIcon : IDisposable
             AppendMenuW(menu, MF_SEPARATOR, 0, null);
         AppendMenuW(menu, MF_STRING | Chk(_enabled), ID_ENABLE, L10n.T("tray.enable"));
         AppendMenuW(menu, MF_STRING | Chk(s.AutoConvert), ID_AUTO, L10n.T("tray.auto"));
+        if (AutoStatus?.Invoke() is { } status)
+            AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status);
+        AppendMenuW(menu, MF_STRING, ID_TASKS, L10n.T("tasks.title"));
         if (s.ClipboardHistoryEnabled)
             AppendMenuW(menu, MF_STRING, ID_CLIPBOARD, L10n.T("clipboard.title"));
         AppendMenuW(menu, MF_STRING, ID_SETTINGS, L10n.T("tray.settings"));
@@ -269,6 +275,7 @@ internal sealed class TrayIcon : IDisposable
         switch (command)
         {
             case ID_ENABLE: SetEnabled(!_enabled); break;
+            case ID_TASKS: TasksRequested?.Invoke(); break;
             case ID_CLIPBOARD:
                 if (target != IntPtr.Zero) SetForegroundWindow(target);
                 ClipboardHistory.Show();

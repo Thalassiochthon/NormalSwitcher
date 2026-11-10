@@ -17,7 +17,7 @@ internal static class AutoConverter
     /// converted word followed by a space. Deferring off the hook thread keeps the callback O(1) and
     /// avoids the LowLevelHooksTimeout / silent-unhook trap (COM + SendInput must not run in-callback).
     /// Returns true if it converted; on "keep" it does nothing (the word + space stay as typed).</summary>
-    public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ")
+    public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ", bool preserveLayout = false)
     {
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
         var settings = Settings.Current;
@@ -103,8 +103,11 @@ internal static class AutoConverter
                 || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
                 return false;
 
-            if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout);
-            Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, input.Layout, learn);
+            if (!preserveLayout)
+            {
+                if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout);
+                Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, input.Layout, learn);
+            }
             return true;
         }
     }

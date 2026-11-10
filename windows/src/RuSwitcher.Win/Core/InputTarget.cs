@@ -24,8 +24,13 @@ internal readonly record struct InputTarget(IntPtr Foreground, IntPtr Focus, Int
     public bool IsPasswordEdit =>
         IsNativeEdit() && (GetWindowLongW(Focus, GWL_STYLE) & ES_PASSWORD) != 0;
 
-    internal Task<bool> MatchesTextAtCaretAsync(string suffix) =>
-        IsNativeEdit() ? Task.FromResult(HasPlainTextAtCaret(suffix)) : AccessibleText.MatchesAtCaretAsync(this, suffix);
+    internal Task<bool> MatchesTextAtCaretAsync(string suffix)
+    {
+        if (!IsNativeEdit()) return AccessibleText.MatchesAtCaretAsync(this, suffix);
+        if (TryReadNativeEdit(out string text, out int start, out int end))
+            return Task.FromResult(MatchesSuffix(text, start, end, suffix));
+        return IsWritableNativeEdit ? AccessibleText.MatchesAtCaretAsync(this, suffix) : Task.FromResult(false);
+    }
 
     internal bool IsWritableNativeEdit =>
         IsNativeEdit() && (GetWindowLongW(Focus, GWL_STYLE) & (ES_PASSWORD | ES_READONLY)) == 0;
@@ -46,10 +51,7 @@ internal readonly record struct InputTarget(IntPtr Foreground, IntPtr Focus, Int
         if (packed < 0) return false;
         start = (int)(packed & 0xFFFF);
         end = (int)((packed >> 16) & 0xFFFF);
-        const int maxRead = 4096;
-        if (end > maxRead) return false;
-
-        var buffer = new StringBuilder(maxRead + 1);
+        var buffer = new StringBuilder(Math.Max(4096, end) + 1);
         if (SendMessageTimeoutTextW(Focus, WM_GETTEXT, (IntPtr)buffer.Capacity, buffer,
                 SMTO_ABORTIFHUNG, 20, out _) == IntPtr.Zero)
             return false;

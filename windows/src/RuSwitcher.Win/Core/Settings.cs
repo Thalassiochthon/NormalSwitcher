@@ -57,7 +57,12 @@ public sealed class Settings
     public bool WordEndOnEnter { get; set; }
     public bool WordEndOnTab { get; set; }
     public Dictionary<string, string> Abbreviations { get; set; } = new(StringComparer.Ordinal);
-    public Dictionary<ShortcutAction, KeyChord> GlobalShortcuts { get; set; } = new();
+    public bool TaskShortcutsInitialized { get; set; }
+    public Dictionary<ShortcutAction, KeyChord> GlobalShortcuts { get; set; } = new(); set; } = new()
+    {
+        [ShortcutAction.OpenTasks] = new(0x54, 6),
+        [ShortcutAction.CaptureTask] = new(0x56, 7)
+    };
     public bool KeyboardEnabled { get; set; } = true;
     public bool HideTrayIcon { get; set; }
     public bool MonochromeTray { get; set; }
@@ -101,6 +106,7 @@ public sealed class Settings
     public long FirstLayout { get; set; }
     public long SecondLayout { get; set; }
 
+    public bool ReceiveBetaUpdates { get; set; }
     public bool ClipboardHistoryEnabled { get; set; }
     public bool ClipboardHistoryPersistent { get; set; }
     public ClipboardShortcut ClipboardHistoryShortcut { get; set; }

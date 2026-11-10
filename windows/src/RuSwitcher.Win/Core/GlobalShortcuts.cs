@@ -3,7 +3,7 @@ using static RuSwitcher.Win.Native.Win32;
 
 namespace RuSwitcher.Win.Core;
 
-public enum ShortcutAction { Correct, Switch, FirstLayout, SecondLayout, ChangeCase, AddException }
+public enum ShortcutAction { Correct, Switch, FirstLayout, SecondLayout, ChangeCase, AddException, OpenTasks, CaptureTask }
 
 public readonly record struct KeyChord(uint Key, uint Modifiers)
 {
@@ -27,21 +27,32 @@ internal sealed class GlobalShortcuts(IntPtr window) : IDisposable
 {
     private const int BaseId = 20;
     private readonly Dictionary<ShortcutAction, KeyChord> _active = [];
-    private (ShortcutAction Action, KeyChord Chord, InputTarget Target)? _pending;
+    private (ShortcutAction Action, KeyChord Chord, InputTarget? Target)? _pending;
 
     public event Action<ShortcutAction>? Activated;
 
     public void Initialize()
     {
+        var settings = Settings.Current;
+        if (!settings.TaskShortcutsInitialized)
+        {
+            settings.GlobalShortcuts.TryAdd(ShortcutAction.OpenTasks, new(0x54, MOD_CONTROL | MOD_SHIFT));
+            settings.GlobalShortcuts.TryAdd(ShortcutAction.CaptureTask, new(0x56, MOD_CONTROL | MOD_ALT | MOD_SHIFT));
+            settings.TaskShortcutsInitialized = true;
+            settings.Save();
+        }
         foreach (var (action, chord) in Settings.Current.GlobalShortcuts)
             if (Enum.IsDefined(action)) TryRegister(action, chord);
     }
+
+    public bool IsRegistered(ShortcutAction action) => _active.ContainsKey(action);
 
     public KeyChord? Get(ShortcutAction action) =>
         Settings.Current.GlobalShortcuts.TryGetValue(action, out var chord) ? chord : null;
 
     public bool Set(ShortcutAction action, KeyChord? chord)
     {
+        if (_pending?.Action == action) _pending = null;
         if (_active.TryGetValue(action, out var previous) && previous == chord) return true;
         if (_active.Remove(action)) UnregisterHotKey(window, BaseId + (int)action);
         if (chord is { } selected && !TryRegister(action, selected))
@@ -73,7 +84,13 @@ internal sealed class GlobalShortcuts(IntPtr window) : IDisposable
     public void Handle(IntPtr id)
     {
         var action = (ShortcutAction)(id.ToInt64() - BaseId);
-        if (!_active.TryGetValue(action, out var chord) || InputTarget.Capture() is not { } target) return;
+        if (!_active.TryGetValue(action, out var chord)) return;
+        if (action is ShortcutAction.OpenTasks or ShortcutAction.CaptureTask)
+        {
+            _pending = (action, chord, null);
+            return;
+        }
+        if (InputTarget.Capture() is not { } target) return;
         GetWindowThreadProcessId(target.Foreground, out uint pid);
         if (pid != Environment.ProcessId) _pending = (action, chord, target);
     }
@@ -82,7 +99,7 @@ internal sealed class GlobalShortcuts(IntPtr window) : IDisposable
     {
         if (_pending is not { } request || HeldModifiers() != 0 || IsDown((int)request.Chord.Key)) return;
         _pending = null;
-        if (InputTarget.Capture() is { } current && request.Target.SameControl(current))
+        if (request.Target == null || InputTarget.Capture() is { } current && request.Target.Value.SameControl(current))
             Activated?.Invoke(request.Action);
     }
 

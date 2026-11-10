@@ -6,9 +6,10 @@ namespace RuSwitcher.Win.UI;
 
 internal sealed class ClipboardHistoryMenu : Form
 {
+    public string? TaskText { get; private set; }
     public string? Selection { get; private set; }
 
-    public ClipboardHistoryMenu(string[] entries, bool storageError, Func<string[]?> retry, Func<bool> clearHistory)
+    public ClipboardHistoryMenu(string[] entries, bool storageError, Func<string[]?> retry, Func<bool> clearHistory, bool tasksAvailable)
     {
         Text = L10n.T("clipboard.title");
         FormBorderStyle = FormBorderStyle.FixedToolWindow;
@@ -32,6 +33,13 @@ internal sealed class ClipboardHistoryMenu : Form
         summary.Controls.AddRange([all, count]);
         var list = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
         var paste = new Button { Text = L10n.T("clipboard.paste"), AutoSize = true };
+        var task = new Button { Text = L10n.T("tasks.add"), AutoSize = true, Visible = tasksAvailable };
+        task.Click += (_, _) =>
+        {
+            if (list.SelectedIndex < 0 || list.SelectedIndex >= visible.Length) return;
+            TaskText = visible[list.SelectedIndex];
+            DialogResult = DialogResult.OK;
+        };
         var clear = new Button { Text = L10n.T("clipboard.clear"), AutoSize = true };
         var close = new Button { Text = L10n.T("settings.close"), AutoSize = true, DialogResult = DialogResult.Cancel };
         var retryButton = new Button { Text = L10n.T("clipboard.retry"), AutoSize = true };
@@ -53,6 +61,7 @@ internal sealed class ClipboardHistoryMenu : Form
             if (visible.Length > 0) list.SelectedIndex = 0;
             else list.Items.Add(L10n.T(query.Length == 0 ? "clipboard.empty" : "clipboard.noMatches"));
             paste.Enabled = visible.Length > 0;
+            task.Enabled = visible.Length > 0;
             count.Text = L10n.T("clipboard.count", visible.Length, entries.Length);
         }
 
@@ -86,7 +95,7 @@ internal sealed class ClipboardHistoryMenu : Form
             RefreshEntries();
         };
         var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
-        footer.Controls.AddRange([close, paste, clear, retryButton]);
+        footer.Controls.AddRange([close, paste, task, clear, retryButton]);
         Controls.Add(list);
         Controls.Add(warning);
         Controls.Add(summary);

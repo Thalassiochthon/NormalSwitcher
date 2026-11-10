@@ -48,7 +48,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
     {
         try
         {
-            if (enabled && !RetryStorage()) return false;
+            if (enabled && !RetryStorage(includeCurrent: true)) return false;
             if (!enabled) _store.Clear();
             _storageReady = enabled;
             if (!enabled) _pending.Clear();
@@ -113,16 +113,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         if (sequence == 0 || sequence == _sequence) return;
         try
         {
-            var data = Clipboard.GetDataObject();
-            string? text = data != null
-                && !data.GetDataPresent(DataFormats.FileDrop, false)
-                && !data.GetDataPresent("ExcludeClipboardContentFromMonitorProcessing", false)
-                && !data.GetDataPresent("CanIncludeInClipboardHistory", false)
-                && !data.GetDataPresent("CanUploadToCloudClipboard", false)
-                && !data.GetDataPresent("Clipboard Viewer Ignore", false)
-                && InputTarget.Capture() is not { IsPasswordEdit: true }
-                && data.GetDataPresent(DataFormats.UnicodeText, false)
-                ? data.GetData(DataFormats.UnicodeText, false) as string : null;
+            string? text = ReadAllowedText();
             if (GetClipboardSequenceNumber() != sequence) return;
             _sequence = sequence;
             if (!ClipboardHistoryStore.IsValid(text) || _items.FirstOrDefault() == text) return;
@@ -144,9 +135,40 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         catch (ExternalException) { /* The clipboard owner may still have it open. Retry on the next tick. */ }
     }
 
+    internal static string? ReadAllowedText()
+    {
+        var data = Clipboard.GetDataObject();
+        return data != null
+            && !data.GetDataPresent(DataFormats.FileDrop, false)
+            && !data.GetDataPresent("ExcludeClipboardContentFromMonitorProcessing", false)
+            && !Disallows(data, "CanIncludeInClipboardHistory")
+            && !Disallows(data, "CanUploadToCloudClipboard")
+            && !data.GetDataPresent("Clipboard Viewer Ignore", false)
+            && InputTarget.Capture() is not { IsPasswordEdit: true }
+            && data.GetDataPresent(DataFormats.UnicodeText, false)
+            ? data.GetData(DataFormats.UnicodeText, false) as string : null;
+    }
+
+    private static bool Disallows(IDataObject data, string format)
+    {
+        if (!data.GetDataPresent(format, false)) return false;
+        return data.GetData(format, false) switch
+        {
+            int value => value != 1,
+            uint value => value != 1,
+            byte[] bytes => bytes.Length < 4 || BitConverter.ToUInt32(bytes) != 1,
+            MemoryStream stream => stream.Length < 4 || BitConverter.ToUInt32(stream.ToArray()) != 1,
+            _ => true
+        };
+    }
+
+    public Action<string>? TaskRequested { get; set; }
+    public bool IsOpen => _open;
+    public bool ShortcutRegistered => _registered;
+
     public void Show()
     {
-        if (_open || !Settings.Current.ClipboardHistoryEnabled) return;
+        if (_open || Form.ActiveForm?.Modal == true || !Settings.Current.ClipboardHistoryEnabled) return;
         Poll();
         var target = InputTarget.Capture();
         if (target is { IsPasswordEdit: true }) return;
@@ -163,13 +185,14 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
                 catch { return null; }
             }
             return _items.ToArray();
-        }, Clear);
+        }, Clear, TaskRequested != null);
         _open = true;
         try { menu.ShowDialog(); }
         finally { _open = false; }
 
         if (target is { } original) SetForegroundWindow(original.Foreground);
-        if (menu.Selection is { } selected && target is { } expected)
+        if (menu.TaskText is { } task) TaskRequested?.Invoke(task);
+        else if (menu.Selection is { } selected && target is { } expected)
             _ = PasteAsync(selected, expected);
     }
 
@@ -203,7 +226,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         catch { HasError = true; }
     }
 
-    private bool RetryStorage()
+    private bool RetryStorage(bool includeCurrent = false)
     {
         try
         {
@@ -212,7 +235,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             catch (FileNotFoundException) { saved = []; }
             catch (DirectoryNotFoundException) { saved = []; }
 
-            var merged = _pending.Concat(_items).Concat(saved)
+            var merged = _pending.Concat(includeCurrent ? _items : []).Concat(saved)
                 .Distinct().Take(ClipboardHistoryStore.Limit).ToArray();
             _store.Write(merged);
             _items.Clear();

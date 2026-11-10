@@ -24,7 +24,7 @@ internal sealed class SettingsForm : Form
     public event Action? AppearanceChanged;
     public event Action<bool>? KeyboardEnabledChanged;
 
-    public SettingsForm(ClipboardHistory history, GlobalShortcuts globalShortcuts, string logPath, bool keyboardHookReady)
+    public SettingsForm(ClipboardHistory history, GlobalShortcuts globalShortcuts, string logPath, bool keyboardHookReady, Action? openTasks = null)
     {
         var s = Settings.Current;
         Text = L10n.T("settings.title");
@@ -101,7 +101,8 @@ internal sealed class SettingsForm : Form
 
         var triggers = Enum.GetValues<TriggerKind>().Select(TrayIcon.TriggerName).ToArray();
         var configurable = Enum.GetValues<ShortcutAction>().Select(action =>
-            ShortcutButton("hotkeys." + action, () => globalShortcuts.Get(action), chord => globalShortcuts.Set(action, chord)));
+            ShortcutButton("hotkeys." + action, () => globalShortcuts.Get(action), chord => globalShortcuts.Set(action, chord),
+                () => globalShortcuts.IsRegistered(action)));
         AddPage("hotkeys",
             [Choice("settings.trigger", triggers, (int)s.Trigger, index =>
             {
@@ -148,7 +149,8 @@ internal sealed class SettingsForm : Form
                 ShowClipboardError("clipboard.storageError");
             }
         };
-        var shortcut = ShortcutButton("clipboard.shortcut", () => history.DisplayShortcut, history.SetCustomShortcut);
+        var shortcut = ShortcutButton("clipboard.shortcut", () => history.DisplayShortcut, history.SetCustomShortcut,
+            () => !s.ClipboardHistoryEnabled || history.ShortcutRegistered);
         var enabled = new CheckBox { Text = L10n.T("clipboard.enable"), AutoSize = true, Checked = s.ClipboardHistoryEnabled };
         enabled.Click += (_, _) =>
         {
@@ -159,7 +161,9 @@ internal sealed class SettingsForm : Form
             }
             persist.Enabled = enabled.Checked;
         };
-        AddPage("clipboard", enabled, shortcut, persist,
+        var tasks = new Button { Text = L10n.T("tasks.title"), AutoSize = true };
+        tasks.Click += (_, _) => { Close(); openTasks?.Invoke(); };
+        AddPage("clipboard", enabled, shortcut, persist, tasks,
             Hint("clipboard.hint"));
 
         var openLog = new Button { Text = L10n.T("settings.log.open"), AutoSize = true };
@@ -182,6 +186,7 @@ internal sealed class SettingsForm : Form
             Check("settings.wholeline", s.ConvertWholeLine, value => { s.ConvertWholeLine = value; s.Save(); }),
             Check("settings.smart", s.SmartConversion, value => { s.SmartConversion = value; s.Save(); }),
             Check("settings.byText", s.ConvertByText, value => { s.ConvertByText = value; s.Save(); }),
+            Check("upd.beta", s.ReceiveBetaUpdates, value => { s.ReceiveBetaUpdates = value; Updater.UpdatePreferenceChanged(); }),
             Check("settings.updates", s.CheckUpdatesEnabled, value => { s.CheckUpdatesEnabled = value; s.Save(); }),
             Check("settings.remote", s.RemoteDesktopMode, value => { s.RemoteDesktopMode = value; s.Save(); }),
             Check("settings.log.enable", s.DebugLogging, value => { s.DebugLogging = value; s.Save(); }),
@@ -357,7 +362,7 @@ internal sealed class SettingsForm : Form
             Padding = new Padding(0, 4, 0, 0)
         };
         details.Controls.Add(TextLabel("NormalSwitcher", 17, FontStyle.Bold));
-        details.Controls.Add(TextLabel(L10n.T("settings.about.version", Updater.Current.ToString(3)), 10));
+        details.Controls.Add(TextLabel(L10n.T("settings.about.version", Updater.CurrentRelease), 10));
         header.Controls.AddRange([logo, details]);
         return header;
     }
@@ -369,15 +374,17 @@ internal sealed class SettingsForm : Form
         return row;
     }
 
-    private Control ShortcutButton(string key, Func<KeyChord?> current, Func<KeyChord?, bool> save)
+    private Control ShortcutButton(string key, Func<KeyChord?> current, Func<KeyChord?, bool> save, Func<bool>? registered = null)
     {
-        var button = new Button { Text = current()?.ToString() ?? L10n.T("settings.off"), AutoSize = true };
+        string Display() => current() is not { } chord ? L10n.T("settings.off") :
+            registered?.Invoke() == false ? L10n.T("tasks.shortcutUnavailable", chord) : chord.ToString();
+        var button = new Button { Text = Display(), AutoSize = true };
         button.Click += (_, _) =>
         {
             using var recorder = new ShortcutRecorder();
             if (recorder.ShowDialog(this) != DialogResult.OK) return;
             if (save(recorder.Chord))
-                button.Text = current()?.ToString() ?? L10n.T("settings.off");
+                button.Text = Display();
             else
                 MessageBox.Show(this, L10n.T("clipboard.hotkeyError"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         };

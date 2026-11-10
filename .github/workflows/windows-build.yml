@@ -5,7 +5,7 @@ name: windows-build
 # flagged that pushes were never compile-checked).
 on:
   push:
-    branches: [windows-preview, wip/windows, main]
+    branches: [windows-preview, wip/windows, main, windows/macos-parity-audit]
     paths:
       - 'windows/**'
       - '.github/workflows/windows-build.yml'
@@ -17,6 +17,11 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        rid: [win-x64, win-arm64]
+    env:
+      TEST_VERSION: ${{ github.ref == 'refs/heads/windows/macos-parity-audit' && format('0.2.7-beta.{0}', github.run_number) || '0.1.0' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,17 +40,48 @@ jobs:
       - name: Publish single-file exe
         run: >
           dotnet publish windows/src/RuSwitcher.Win/RuSwitcher.Win.csproj
-          -c Release -r win-x64 --self-contained true
+          -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:Version=${{ env.TEST_VERSION }}
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish --nologo
 
       - name: Smoke-test installer upgrade and restart
+        if: matrix.rid == 'win-x64'
         shell: pwsh
-        run: ./windows/tests/install-upgrade.ps1
+        run: |
+          if ($env:TEST_VERSION -ne '0.1.0') {
+            Move-Item publish beta-publish
+            try {
+              dotnet publish windows/src/RuSwitcher.Win/RuSwitcher.Win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=0.1.0 -o publish
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              ./windows/tests/install-upgrade.ps1
+            } finally {
+              if (Test-Path publish) { Remove-Item publish -Recurse -Force }
+              Move-Item beta-publish publish
+            }
+          } else {
+            ./windows/tests/install-upgrade.ps1
+          }
+
+      - name: Build x64 beta installer for manual acceptance
+        if: matrix.rid == 'win-x64' && github.ref == 'refs/heads/windows/macos-parity-audit'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DMyAppVersion=$env:TEST_VERSION" "/DSourceExe=$env:GITHUB_WORKSPACE\publish\NormalSwitcher.exe" windows/installer/RuSwitcher.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload x64 beta installer
+        if: matrix.rid == 'win-x64' && github.ref == 'refs/heads/windows/macos-parity-audit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NormalSwitcher-beta-installer-x64
+          path: windows/installer/dist/NormalSwitcher-Setup-${{ env.TEST_VERSION }}.exe
+          if-no-files-found: error
 
       - name: Upload exe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NormalSwitcher-win-x64
+          name: NormalSwitcher-${{ matrix.rid }}
           path: publish/NormalSwitcher.exe
           if-no-files-found: error
