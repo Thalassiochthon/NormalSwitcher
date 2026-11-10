@@ -1,8 +1,9 @@
 {
-  "version": "3.5.0g",
-  "build": "61",
+  "version": "1.2.0a",
+  "build": "77",
   "dev": "",
-  "url": "https://github.com/rashn/RuSwitcher/releases",
-  "notes": "\ud83c\uddf7\ud83c\uddfa \u0427\u0442\u043e \u043d\u043e\u0432\u043e\u0433\u043e \u0432 \u0431\u0435\u0442\u0435 3.5.0g:\n\u2022 \u041d\u043e\u0432\u0430\u044f \u0438\u043a\u043e\u043d\u043a\u0430 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f: \u0441\u0438\u043d\u044f\u044f \u043a\u043b\u0430\u0432\u0438\u0448\u0430 \u0441\u043e \u0441\u0442\u0440\u0435\u043b\u043a\u0430\u043c\u0438 \u0432\u043c\u0435\u0441\u0442\u043e \u043f\u043b\u0430\u0448\u043a\u0438 RU/EN. \u0410\u0432\u0442\u043e\u0440 - kutawhat (#39), \u0441\u043f\u0430\u0441\u0438\u0431\u043e.\n\u2022 \u0412\u0441\u0451 \u0438\u0437 \u0431\u0435\u0442 3.5.0a-3.5.0f \u043f\u043e-\u043f\u0440\u0435\u0436\u043d\u0435\u043c\u0443 \u0432\u043d\u0443\u0442\u0440\u0438.\n\n\ud83c\uddec\ud83c\udde7 What's new in beta 3.5.0g:\n\u2022 New app icon: a blue keycap with arrows instead of the RU/EN tile. Designed by kutawhat (#39), thank you.\n\u2022 Everything from betas 3.5.0a-3.5.0f is still included.",
-  "sha256": "a212f51d243766dd4d0bf3296a4d46938da41823e1897ebcd035744b55a163b9"
+  "notes": "Бета 1.2.0 — задачи из буфера обмена, компактная история с поиском, шифрование истории и понятный статус автоисправления.\n\nЗадачи: Control+Shift+T. Сохранить текст буфера в задачу: Control+Option+Shift+V. История: Control+Shift+V. Сочетания меняются в настройках.\n\nЭто тестовый выпуск для добровольной проверки. Проверьте создание и сохранение задач, вставку в нужное окно, горячие клавиши и работу после перезапуска.\n\nBeta 1.2.0: clipboard tasks, compact searchable history, encrypted clipboard persistence and automatic-correction status. Configurable shortcuts; please test capture, paste focus and persistence after restart.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0a",
+  "sha256": "8eab9c0ae2a09bc3d93d0512a8d90c12c7d72529d9798a6f029a2e4867efd6eb",
+  "source_commit": "6e98fd3e71b62b9153c1b624095186ff4bf9d981"
 }
