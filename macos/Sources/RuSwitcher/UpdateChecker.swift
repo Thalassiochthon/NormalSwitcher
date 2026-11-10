@@ -19,19 +19,31 @@ enum UpdateChecker {
 
     private static let minimumAutomaticCheckInterval: TimeInterval = 3600
     private static var checking = false
+    private static var showResult = false
+    private static var availableVersion: String?
 
-    /// Проверить при запуске (с задержкой 5 сек, не чаще раза в час).
+    static var menuTitle: String {
+        guard let version = availableVersion,
+              version != SettingsManager.shared.skippedVersion,
+              version.last?.isLetter != true || SettingsManager.shared.betaChannelEnabled else {
+            return L10n.menuCheckUpdates
+        }
+        return "\(L10n.updateAvailable) (\(version))…"
+    }
+
+    /// Проверить при запуске с задержкой в 5 секунд.
     /// Отключается через настройку `checkUpdatesEnabled`. Ручная проверка (`checkNow`) работает всегда.
     static func checkOnLaunch() {
-        guard shouldAutoCheck() else { return }
+        guard SettingsManager.shared.checkUpdatesEnabled else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-            Task { await check(silent: true) }
+            Task {
+                if SettingsManager.shared.checkUpdatesEnabled { await check(silent: true) }
+            }
         }
     }
 
     /// Периодическая тихая авто-проверка, пока приложение работает (из таймера AppDelegate).
-    /// Тот же троттл (не чаще раза в сутки) и та же настройка `checkUpdatesEnabled`, что и на старте,
-    /// поэтому долго-живущий инстанс тоже ловит новые версии, а не только при перезапуске.
+    /// Обновляет пункт меню без открытия окна.
     static func checkPeriodic() {
         guard shouldAutoCheck() else { return }
         Task { await check(silent: true) }
@@ -54,13 +66,17 @@ enum UpdateChecker {
     }
 
     private static func check(silent: Bool) async {
+        if !silent { showResult = true }
         guard !checking else { return }
         checking = true
-        defer { checking = false }
+        defer {
+            showResult = false
+            checking = false
+        }
         guard let info = await fetchApplicableInfo() else {
             // nil = стабильный фид недостижим (сеть). Бета-фид опционален и на это не влияет.
             rslog("UpdateChecker: stable feed unreachable")
-            if !silent { await showErrorAlert() }
+            if showResult { await showErrorAlert() }
             return
         }
 
@@ -68,13 +84,14 @@ enum UpdateChecker {
 
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
 
-        if compareVersions(info.version, isNewerThan: currentVersion) {
-            if SettingsManager.shared.skippedVersion == info.version && silent {
-                return // Пользователь пропустил эту версию
+        let newer = compareVersions(info.version, isNewerThan: currentVersion)
+        availableVersion = newer ? info.version : nil
+        if showResult {
+            if newer {
+                await showUpdatePanel(info: info, currentVersion: currentVersion)
+            } else {
+                await showUpToDateAlert()
             }
-            await showUpdatePanel(info: info, currentVersion: currentVersion)
-        } else if !silent {
-            await showUpToDateAlert()
         }
     }
 

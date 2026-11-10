@@ -38,9 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         showBetaWhatsNewIfNeeded()   // отдельная витрина для бет (текст из бета-фида)
         UpdateChecker.checkOnLaunch()
         // Периодическая авто-проверка обновлений, пока приложение работает (не только на старте).
-        // Тикает каждые 6ч; сам запрос к GitHub не чаще раза в сутки (троттл в UpdateChecker) и
-        // уважает настройку «Автоматически проверять обновления» (её можно снять, чтобы отключить).
-        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in
+        // Проверка обновляет пункт меню, если включена в настройках.
+        updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { _ in
             Task { @MainActor in
                 UpdateChecker.checkPeriodic()
                 await FrequencyPacks.refreshIfDue()
@@ -1028,6 +1027,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let settings = NSMenuItem(title: L10n.menuSettings, action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
+        let update = NSMenuItem(title: UpdateChecker.menuTitle, action: #selector(checkForUpdates), keyEquivalent: "")
+        update.target = self
+        update.tag = Self.updateItemTag
+        menu.addItem(update)
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: L10n.menuQuit, action: #selector(quit), keyEquivalent: "q")
@@ -1044,6 +1047,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Метка пунктов-раскладок, чтобы находить и обновлять их группу в меню.
     private static let layoutItemTag = 741
     private static let permissionsItemTag = 742
+    private static let updateItemTag = 743
 
     /// Пункты списка раскладок: «флаг + локализованное имя», галочка на текущей.
     private func layoutMenuItems() -> [NSMenuItem] {
@@ -1070,11 +1074,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard menu === statusItem.menu else { return }
         statusMenuPasteTarget = NSWorkspace.shared.frontmostApplication
         menu.item(withTag: Self.permissionsItemTag)?.isHidden = permissionsGranted
+        menu.item(withTag: Self.updateItemTag)?.title = UpdateChecker.menuTitle
         let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 2 : 0)
         for old in menu.items where old.tag == Self.layoutItemTag { menu.removeItem(old) }
         for (offset, item) in layoutMenuItems().enumerated() {
             menu.insertItem(item, at: insertAt + offset)
         }
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateChecker.checkNow()
     }
 
     @objc private func selectLayout(_ sender: NSMenuItem) {
