@@ -1,6 +1,6 @@
 {
-  "version": "0.1.0",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.1.0",
-  "notes": "First NormalSwitcher preview for Windows.",
-  "sha256": ""
+  "version": "0.1.1",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.1.1",
+  "notes": "Новый фиолетовый значок. Испанская раскладка использует испанский словарь Windows. При нескольких установленных раскладках текст исправляется, если подходит только один вариант.\n\nNew violet icon. Spanish layouts use the Windows Spanish dictionary. With multiple installed layouts, automatic correction applies when there is a single match.",
+  "sha256": "fec13cd238d264b8a42af7c90f37a5cf8eed677d2b4dae11415355640ea23bd1"
 }
