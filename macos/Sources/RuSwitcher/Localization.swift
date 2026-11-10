@@ -182,6 +182,12 @@ enum L10n {
     static var securePausedTitle: String { s("secure.paused.title") }
     static var securePausedBody: String { s("secure.paused.body") }
     static var securePausedUnknownApp: String { s("secure.paused.unknownapp") }
+    static var updateInstalledVersion: String { s("update.installedVersion") }
+    static var updateOptions: String { s("update.options") }
+    static var updateDownloading: String { s("update.downloading") }
+    static var updateVerifying: String { s("update.verifying") }
+    static var updateInstalling: String { s("update.installing") }
+    static var updateRestarting: String { s("update.restarting") }
     static var updateNewVersion: String { s("update.newVersion") }
     static var updateDownload: String { s("update.download") }
     static var updateInstallRestart: String { s("update.installRestart") }
@@ -429,6 +435,12 @@ enum L10n {
             "secure.paused.body": "Secure Input is active — it’s held by %@. NormalSwitcher isn’t touching your keystrokes (it never reads what you type there). Switch away from that app, or turn off its “Secure Keyboard Entry”, to resume.",
             "secure.paused.unknownapp": "another app",
             "update.newVersion": "New version:",
+            "update.installedVersion": "Installed version:",
+            "update.options": "Update options",
+            "update.downloading": "Downloading update…",
+            "update.verifying": "Verifying update…",
+            "update.installing": "Installing update…",
+            "update.restarting": "Restarting NormalSwitcher…",
             "update.download": "Download",
             "update.installRestart": "Install & Restart",
             "update.skip": "Skip",
@@ -621,6 +633,12 @@ enum L10n {
             "secure.paused.body": "Защищённый ввод активен — его удерживает %@. NormalSwitcher не трогает ваши клавиши (и никогда не читает, что вы там печатаете). Переключитесь из этого приложения или отключите в нём «Защищённый ввод», чтобы продолжить.",
             "secure.paused.unknownapp": "другое приложение",
             "update.newVersion": "Новая версия:",
+            "update.installedVersion": "Установленная версия:",
+            "update.options": "Варианты обновления",
+            "update.downloading": "Скачивание обновления…",
+            "update.verifying": "Проверка обновления…",
+            "update.installing": "Установка обновления…",
+            "update.restarting": "Перезапуск NormalSwitcher…",
             "update.download": "Скачать",
             "update.installRestart": "Установить и перезапустить",
             "update.skip": "Пропустить",

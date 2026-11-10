@@ -18,6 +18,7 @@ enum UpdateChecker {
     }
 
     private static let minimumAutomaticCheckInterval: TimeInterval = 3600
+    private static var checking = false
 
     /// Проверить при запуске (с задержкой 5 сек, не чаще раза в час).
     /// Отключается через настройку `checkUpdatesEnabled`. Ручная проверка (`checkNow`) работает всегда.
@@ -53,6 +54,9 @@ enum UpdateChecker {
     }
 
     private static func check(silent: Bool) async {
+        guard !checking else { return }
+        checking = true
+        defer { checking = false }
         guard let info = await fetchApplicableInfo() else {
             // nil = стабильный фид недостижим (сеть). Бета-фид опционален и на это не влияет.
             rslog("UpdateChecker: stable feed unreachable")
@@ -68,7 +72,7 @@ enum UpdateChecker {
             if SettingsManager.shared.skippedVersion == info.version && silent {
                 return // Пользователь пропустил эту версию
             }
-            await showUpdateAlert(info: info)
+            await showUpdatePanel(info: info, currentVersion: currentVersion)
         } else if !silent {
             await showUpToDateAlert()
         }
@@ -105,35 +109,29 @@ enum UpdateChecker {
         }
     }
 
-    private static func showUpdateAlert(info: VersionInfo) async {
-        let isBeta = info.version.last?.isLetter ?? false   // «3.2.0a» — пред-релиз
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = L10n.updateAvailable + (isBeta ? " " + L10n.updateBeta : "")
-        alert.informativeText = "\(L10n.updateNewVersion) \(info.version)\n\(info.notes ?? "")"
-        alert.addButton(withTitle: L10n.updateInstallRestart)  // 1st
-        alert.addButton(withTitle: L10n.updateDownload)         // 2nd
-        alert.addButton(withTitle: L10n.updateSkip)             // 3rd
-        alert.addButton(withTitle: L10n.updateLater)            // 4th
-
-        let response = alert.runModal()
-        switch response {
-        case .alertFirstButtonReturn:
-            await installAndRestart(info: info)
-        case .alertSecondButtonReturn:
+    private static func showUpdatePanel(info: VersionInfo, currentVersion: String) async {
+        let panel = UpdatePanel(
+            version: info.version, current: currentVersion, notes: info.notes,
+            isBeta: info.version.last?.isLetter ?? false
+        )
+        defer { panel.close() }
+        switch await panel.ask() {
+        case .install:
+            await installAndRestart(info: info, panel: panel)
+        case .download:
             if let url = SettingsManager.releasesURL {
                 NSWorkspace.shared.open(url)
             }
-        case .alertThirdButtonReturn:
+        case .skip:
             SettingsManager.shared.skippedVersion = info.version
-        default:
+        case .later:
             break
         }
     }
 
     // MARK: - Install & Restart
 
-    private static func installAndRestart(info: VersionInfo) async {
+    private static func installAndRestart(info: VersionInfo, panel: UpdatePanel) async {
         let version = info.version
 
         // 0. Версия приходит из сети — не доверяем вслепую (попадёт в URL и в сравнение).
@@ -190,7 +188,8 @@ enum UpdateChecker {
         defer { try? FileManager.default.removeItem(at: tmpURL) }
 
         // 2. Проверить sha256 (обязательно)
-        let actualSHA = sha256OfFile(at: tmpPath)
+        panel.showStage(L10n.updateVerifying)
+        let actualSHA = await Task.detached { sha256OfFile(at: tmpPath) }.value
         guard actualSHA == expectedSHA else {
             rslog("Update: sha256 mismatch expected=\(expectedSHA) actual=\(actualSHA ?? "nil")")
             try? FileManager.default.removeItem(at: tmpURL)
@@ -209,21 +208,13 @@ enum UpdateChecker {
         // 3. Смонтировать DMG (уникальный mountpoint: не пересекается с прошлой попыткой
         //    и не предсказуем заранее — в пару к приватному пути загрузки выше)
         let mountPoint = NSTemporaryDirectory() + "RuSwitcher-update-mount-\(UUID().uuidString.prefix(8))"
-        let mount = Process()
-        mount.launchPath = "/usr/bin/hdiutil"
-        mount.arguments = ["attach", tmpPath, "-nobrowse", "-readonly", "-mountpoint", mountPoint]
-        mount.standardOutput = FileHandle.nullDevice
-        mount.standardError = FileHandle.nullDevice
-        do {
-            try mount.run()
-            mount.waitUntilExit()
-            guard mount.terminationStatus == 0 else {
-                rslog("Update: hdiutil attach failed with status \(mount.terminationStatus)")
-                await showInstallError(L10n.updateInstallFailed)
-                return
-            }
-        } catch {
-            rslog("Update: hdiutil attach error — \(error)")
+        let mounted = await Task.detached {
+            runCommand("/usr/bin/hdiutil", arguments: [
+                "attach", tmpPath, "-nobrowse", "-readonly", "-mountpoint", mountPoint
+            ])
+        }.value
+        guard mounted else {
+            rslog("Update: hdiutil attach failed")
             await showInstallError(L10n.updateInstallFailed)
             return
         }
@@ -245,7 +236,11 @@ enum UpdateChecker {
         // 5. ПРОВЕРКА ПОДПИСИ: единственная реальная защита от подмены кода.
         //    sha256 защищает лишь от битой загрузки — если подменить и DMG, и хэш,
         //    спасает только пиннинг сертификатом Apple нашей команды.
-        guard verifyReleaseSignature(at: sourceApp.path) else {
+        let teamID = SettingsManager.developerTeamID
+        let validSignature = await Task.detached {
+            verifyReleaseSignature(at: sourceApp.path, teamID: teamID)
+        }.value
+        guard validSignature else {
             rslog("Update: release signature check FAILED — aborting")
             await showInstallError(L10n.updateIntegrityFailed)
             return
@@ -279,10 +274,14 @@ enum UpdateChecker {
         let stagingDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("RuSwitcher-update-staging", isDirectory: true)
         try? fm.removeItem(at: stagingDir)
+        panel.showStage(L10n.updateInstalling)
         let stagedApp = stagingDir.appendingPathComponent(appName)
         do {
-            try fm.createDirectory(at: stagingDir, withIntermediateDirectories: true)
-            try fm.copyItem(at: sourceApp, to: stagedApp)
+            try await Task.detached {
+                let files = FileManager.default
+                try files.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+                try files.copyItem(at: sourceApp, to: stagedApp)
+            }.value
         } catch {
             rslog("Update: staging copy failed — \(error)")
             await showInstallError(error.localizedDescription)
@@ -292,7 +291,9 @@ enum UpdateChecker {
 
         // 7. Атомарно заменить .app из staging-копии (на одном томе — работает)
         do {
-            _ = try fm.replaceItemAt(currentApp, withItemAt: stagedApp)
+            _ = try await Task.detached {
+                try FileManager.default.replaceItemAt(currentApp, withItemAt: stagedApp)
+            }.value
             rslog("Update: app replaced successfully")
         } catch {
             rslog("Update: replace failed — \(error)")
@@ -305,9 +306,12 @@ enum UpdateChecker {
         //    оставался смонтированным до перезагрузки, а следующая попытка обновления
         //    перезаписывала backing-файл занятого образа и падала на «Resource busy»
         //    (ревью-находка, воспроизведена).
-        try? fm.removeItem(at: stagingDir)
-        detachUpdateVolume(at: mountPoint)
-        try? fm.removeItem(at: tmpURL)
+        panel.showStage(L10n.updateRestarting)
+        await Task.detached {
+            try? FileManager.default.removeItem(at: stagingDir)
+            detachUpdateVolume(at: mountPoint)
+            try? FileManager.default.removeItem(at: tmpURL)
+        }.value
 
         // 9. Перезапуск
         rslog("Update: restarting...")
@@ -316,23 +320,20 @@ enum UpdateChecker {
 
     /// Тихо размонтирует том обновления. Вынесено из defer, потому что путь успеха
     /// завершает процесс до раскрутки стека — defer там не срабатывает.
-    private static func detachUpdateVolume(at mountPoint: String) {
-        let detach = Process()
-        detach.launchPath = "/usr/bin/hdiutil"
-        detach.arguments = ["detach", mountPoint, "-quiet"]
-        detach.standardOutput = FileHandle.nullDevice
-        detach.standardError = FileHandle.nullDevice
-        try? detach.run()
-        detach.waitUntilExit()
+    private nonisolated static func detachUpdateVolume(at mountPoint: String) {
+        _ = runCommand("/usr/bin/hdiutil", arguments: ["detach", mountPoint, "-quiet"])
     }
 
-    /// Проверяет, что бандл подписан сертификатом Apple нашей команды и проходит строгую
-    /// проверку целостности (codesign --verify с пиннингом Team ID).
-    private static func verifyReleaseSignature(at path: String) -> Bool {
-        let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(SettingsManager.developerTeamID)\""
+    /// Verify the bundle's integrity and pin the Apple signing team.
+    private nonisolated static func verifyReleaseSignature(at path: String, teamID: String) -> Bool {
+        let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""
+        return runCommand("/usr/bin/codesign", arguments: ["--verify", "--deep", "--strict", "-R=\(requirement)", path])
+    }
+
+    private nonisolated static func runCommand(_ executable: String, arguments: [String]) -> Bool {
         let process = Process()
-        process.launchPath = "/usr/bin/codesign"
-        process.arguments = ["--verify", "--deep", "--strict", "-R=\(requirement)", path]
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {
@@ -340,12 +341,12 @@ enum UpdateChecker {
             process.waitUntilExit()
             return process.terminationStatus == 0
         } catch {
-            rslog("Update: codesign verify error — \(error)")
+            rslog("Update: \(executable) failed — \(error)")
             return false
         }
     }
 
-    private static func sha256OfFile(at path: String) -> String? {
+    private nonisolated static func sha256OfFile(at path: String) -> String? {
         let pipe = Pipe()
         let process = Process()
         process.launchPath = "/usr/bin/shasum"
@@ -354,8 +355,9 @@ enum UpdateChecker {
         process.standardError = FileHandle.nullDevice
         do {
             try process.run()
-            process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
             guard let output = String(data: data, encoding: .utf8) else { return nil }
             return output.split(separator: " ").first.map(String.init)
         } catch {
