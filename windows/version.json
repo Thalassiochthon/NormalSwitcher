@@ -1,6 +1,6 @@
 {
-  "version": "0.1.1",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.1.1",
-  "notes": "Новый фиолетовый значок. Испанская раскладка использует испанский словарь Windows. При нескольких установленных раскладках текст исправляется, если подходит только один вариант.\n\nNew violet icon. Spanish layouts use the Windows Spanish dictionary. With multiple installed layouts, automatic correction applies when there is a single match.",
-  "sha256": "fec13cd238d264b8a42af7c90f37a5cf8eed677d2b4dae11415355640ea23bd1"
+  "version": "0.2.0",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.0",
+  "notes": "Обновление из приложения с перезапуском. Новые настройки, история буфера и горячие клавиши.\n\nIn-app updates with automatic restart. New settings, clipboard history and keyboard shortcuts.",
+  "sha256": "28b3574039c3a86e424f9ea98b45fe79289b483a89fdf6c03d9899b2a22b95e9"
 }
