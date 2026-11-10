@@ -83,7 +83,7 @@ internal sealed class SettingsForm : Form
             Check("settings.startup", AutoStart.IsEnabled(), AutoStart.SetEnabled),
             Check("settings.sound", s.SoundOnSwitch, value => { s.SoundOnSwitch = value; s.Save(); }),
             Choice("settings.sound.choice", Sound.Choices.Select(sound => L10n.T("settings.sound." + sound)).ToArray(),
-                Array.IndexOf(Sound.Choices.ToArray(), s.LayoutSound),
+                Array.IndexOf(Sound.Choices.ToArray(), Sound.Resolve(s.LayoutSound)),
                 index => { s.LayoutSound = Sound.Choices[index]; s.Save(); },
                 index => Sound.Play(Sound.Choices[index])),
             Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }),

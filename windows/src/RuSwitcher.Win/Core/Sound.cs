@@ -2,13 +2,23 @@ using System.Media;
 
 namespace RuSwitcher.Win.Core;
 
-/// <summary>Optional system sound used by both layout switching and Settings preview.</summary>
+/// <summary>Optional layout cue and Settings preview using the bundled NormalSwitcher sounds.</summary>
 internal static class Sound
 {
     public const string Default = "default";
-
     internal static IReadOnlyList<string> Choices { get; } =
-        [Default, "beep", "exclamation", "question", "hand"];
+        [Default, "tap", "double", "wood", "drop", "rise", "glass", "soft", "pulse"];
+
+    private static readonly Dictionary<string, SoundPlayer> Players = new(StringComparer.Ordinal);
+
+    internal static string Resolve(string? sound) => sound switch
+    {
+        "beep" => "tap",
+        "exclamation" => "drop",
+        "question" => "rise",
+        "hand" => "wood",
+        _ => sound is not null && Choices.Contains(sound) ? sound : Default,
+    };
 
     public static void Switch()
     {
@@ -16,17 +26,21 @@ internal static class Sound
             Play(Settings.Current.LayoutSound);
     }
 
-    internal static void Play(string sound)
+    internal static void Play(string? sound)
     {
-        var cue = sound switch
+        string name = Resolve(sound);
+        if (name == Default) name = "tap";
+        try
         {
-            "beep" => SystemSounds.Beep,
-            "exclamation" => SystemSounds.Exclamation,
-            "question" => SystemSounds.Question,
-            "hand" => SystemSounds.Hand,
-            _ => SystemSounds.Asterisk,
-        };
-        try { cue.Play(); }
-        catch { /* The sound is unavailable. */ }
+            if (!Players.TryGetValue(name, out var player))
+            {
+                Stream? audio = typeof(Sound).Assembly.GetManifestResourceStream($"LayoutSounds.{name}.wav");
+                if (audio is null) return;
+                player = new SoundPlayer(audio);
+                Players.Add(name, player);
+            }
+            player.Play();
+        }
+        catch { /* Keep switching available if audio playback fails. */ }
     }
 }

@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <EmbeddedResource Include="../../../shared/layout-sounds/*.wav" LogicalName="LayoutSounds.%(Filename)%(Extension)" />
     <EmbeddedResource Include="../../../dicts/en.v1.deflate" LogicalName="WordPacks.en.deflate" />
     <EmbeddedResource Include="../../../dicts/ru.v1.deflate" LogicalName="WordPacks.ru.deflate" />
     <EmbeddedResource Include="../../../dicts/LICENSE" LogicalName="WordPacks.LICENSE" />
