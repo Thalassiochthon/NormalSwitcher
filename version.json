@@ -1,8 +1,8 @@
 {
-  "version": "1.1.0",
-  "build": "70",
+  "version": "1.1.1",
+  "build": "71",
   "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.0",
-  "notes": "Переработали настройки. Сочетания, автоисправление и буфер обмена теперь в отдельных разделах, дополнительные параметры можно раскрыть по мере необходимости. В меню появился короткий пункт «Выход» с ⌘Q.\n\nПри быстром наборе NormalSwitcher применяет исправление раскладки до исходного пробела, если macOS подтверждает, что текст можно безопасно заменить.\n\nRedesigned the settings window and shortened the menu’s Quit label. During fast local typing, automatic layout correction is applied before the original space when macOS can verify the text can be safely replaced.\n",
-  "sha256": "2f56e2ce4c3f62788e38c125b1aecd2ecd9d7005a78c9ec2fecdd4ca745cb6fa"
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.1",
+  "notes": "Фиолетовый значок NormalSwitcher и компактная N для маленьких размеров. Дополнительные словари русского и английского теперь скачиваются из репозитория NormalSwitcher.\n\nViolet NormalSwitcher branding with a compact N for small icons. Optional Russian and English word packs now download from the NormalSwitcher repository.\n",
+  "sha256": "fe57704220aa2f0e46d7f3d0894810cebd7c56063855e3ab5f6806c58ede2f0b"
 }
