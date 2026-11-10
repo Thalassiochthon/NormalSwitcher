@@ -26,12 +26,10 @@ echo "=== Building $APP_NAME v$SHORT_VERSION (build $BUILD_VERSION) ==="
 cd "$PROJECT_DIR"
 
 # 1. Собираем для архитектуры этого Mac.
-SWIFT_BUILD_FLAGS="-c release"
-echo "→ swift build $SWIFT_BUILD_FLAGS..."
-# shellcheck disable=SC2086
-swift build $SWIFT_BUILD_FLAGS
-# shellcheck disable=SC2086
-BUILD_DIR=$(swift build --show-bin-path $SWIFT_BUILD_FLAGS 2>/dev/null)
+SWIFT_BUILD_FLAGS=(-c release "$@")
+echo "→ swift build ${SWIFT_BUILD_FLAGS[*]}..."
+swift build "${SWIFT_BUILD_FLAGS[@]}"
+BUILD_DIR=$(swift build --show-bin-path "${SWIFT_BUILD_FLAGS[@]}" 2>/dev/null)
 # Путь к продукту зависит от версии Swift (.build/apple/… до macOS 27, .build/out/… после),
 # поэтому спрашиваем его у самого swift — и останавливаемся, если ответа нет.
 if [ -z "$BUILD_DIR" ] || [ ! -f "$BUILD_DIR/$PRODUCT_NAME" ]; then

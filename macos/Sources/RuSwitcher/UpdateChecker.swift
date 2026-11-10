@@ -5,10 +5,10 @@ import Foundation
 @MainActor
 enum UpdateChecker {
     // URL к JSON с информацией о версии (стабильный фид).
-    private static let versionURL = "https://raw.githubusercontent.com/antonjas/NormalSwitcher/personal/version.json"
+    private static let versionURL = "https://raw.githubusercontent.com/Thalassiochthon/NormalSwitcher/personal/version.json"
     // Фид пред-релизов (бет). Читается ТОЛЬКО если включён бета-канал в настройках.
     // Может отсутствовать (404) — тогда бета-клиент просто остаётся на стабильном фиде.
-    private static let betaVersionURL = "https://raw.githubusercontent.com/antonjas/NormalSwitcher/personal/version-beta.json"
+    private static let betaVersionURL = "https://raw.githubusercontent.com/Thalassiochthon/NormalSwitcher/personal/version-beta.json"
 
     /// Структура JSON версии
     private struct VersionInfo: Decodable {
@@ -103,7 +103,14 @@ enum UpdateChecker {
         guard let stable = await fetchInfo(from: versionURL) else { return nil }
         guard SettingsManager.shared.betaChannelEnabled else { return stable }
         guard let beta = await fetchInfo(from: betaVersionURL) else { return stable }
-        return compareVersions(beta.version, isNewerThan: stable.version) ? beta : stable
+        return selectsBeta(stable: stable.version, beta: beta.version,
+                           enabled: SettingsManager.shared.betaChannelEnabled) ? beta : stable
+    }
+
+    static func selectsBeta(stable: String, beta: String?, enabled: Bool) -> Bool {
+        guard enabled, let beta,
+              beta.range(of: "^[0-9]+(\\.[0-9]+){1,3}[a-z]$", options: .regularExpression) != nil else { return false }
+        return compareVersions(beta, isNewerThan: stable)
     }
 
     /// Текст изменений текущей беты (поле notes бета-фида) — для отдельной «витрины беты».
@@ -425,7 +432,7 @@ enum UpdateChecker {
     /// («3.2.0a») — это БЕТА, и она СТАРШЕ по числовому ядру, но МЛАДШЕ финала того же
     /// ядра. Порядок: 3.1.0 < 3.2.0a < 3.2.0b < 3.2.0 (финал). Так тестер на «3.2.0c»
     /// получит обновление до финального «3.2.0», когда тот выйдет.
-    private static func compareVersions(_ v1: String, isNewerThan v2: String) -> Bool {
+    static func compareVersions(_ v1: String, isNewerThan v2: String) -> Bool {
         semverCompare(v1, v2) == .orderedDescending
     }
 

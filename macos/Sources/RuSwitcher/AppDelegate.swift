@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let keyboardMonitor = KeyboardMonitor()
     private let textConverter = TextConverter()
     private lazy var clipboardHistory = ClipboardHistory(converter: textConverter, keyboardMonitor: keyboardMonitor)
+    private let quickTasks = QuickTasks()
     private let settingsController = SettingsWindowController()
     private let perAppLayoutManager = PerAppLayoutManager()
     private var permissionCheckTimer: Timer?
@@ -26,6 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         startedAsLoginItem = Self.launchedAsLoginItem()   // Apple-событие запуска доступно только сейчас
         clipboardHistory.configure()
+        clipboardHistory.onAddTask = { [weak self] in self?.quickTasks.addFromClipboard($0) }
+        quickTasks.readClipboard = { [weak self] in self?.clipboardHistory.currentText() }
+        quickTasks.start()
         setupStatusItem()
         setupSettingsCallbacks()
         syncLoginItem()
@@ -130,6 +134,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self, !self.clipboardHistory.updatePersistence() else { return }
             self.clipboardHistory.showStorageError()
         }
+        settingsController.taskShortcutAvailable = { [weak self] in self?.quickTasks.isAvailable($0) == true }
+        settingsController.onTaskShortcutChanged = { [weak self] action, shortcut in
+            guard let self else { return false }
+            let changed = self.quickTasks.changeShortcut(action, to: shortcut)
+            self.rebuildMenu()
+            return changed
+        }
+        settingsController.onTaskShortcutEnabled = { [weak self] action, enabled in
+            guard let self else { return false }
+            let changed = self.quickTasks.setShortcutEnabled(action, to: enabled)
+            self.rebuildMenu()
+            return changed
+        }
+        settingsController.onOpenTasks = { [weak self] in self?.quickTasks.show() }
         settingsController.onClipboardHistoryShortcutChanged = { [weak self] shortcut in
             guard let self else { return false }
             let changed = self.clipboardHistory.changeShortcut(shortcut)
@@ -1005,8 +1023,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 history.keyEquivalentModifierMask = shortcut.menuModifierFlags
             }
             menu.addItem(history)
-            menu.addItem(.separator())
         }
+
+        let tasks = NSMenuItem(title: taskText("Tasks…", "Задачи…"),
+                               action: #selector(openQuickTasks), keyEquivalent: "")
+        tasks.target = self
+        if quickTasks.isAvailable(.open) {
+            let shortcut = TaskShortcut.open.shortcut
+            tasks.keyEquivalent = shortcut.menuKeyEquivalent
+            tasks.keyEquivalentModifierMask = shortcut.menuModifierFlags
+        }
+        menu.addItem(tasks)
+        menu.addItem(.separator())
 
         for item in layoutMenuItems() { menu.addItem(item) }
         menu.addItem(.separator())
@@ -1016,6 +1044,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoConvert.target = self
         autoConvert.state = SettingsManager.shared.autoConvert ? .on : .off
         menu.addItem(autoConvert)
+        let correctionStatus = NSMenuItem(title: automaticCorrectionStatus, action: nil, keyEquivalent: "")
+        correctionStatus.tag = Self.autoCorrectionStatusTag
+        correctionStatus.indentationLevel = 1
+        menu.addItem(correctionStatus)
         menu.addItem(.separator())
 
         let missing = NSMenuItem(title: L10n.menuCheckPermissions, action: #selector(recheckPermissions), keyEquivalent: "")
@@ -1048,6 +1080,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let layoutItemTag = 741
     private static let permissionsItemTag = 742
     private static let updateItemTag = 743
+    private static let autoCorrectionStatusTag = 744
+
+    private var automaticCorrectionStatus: String {
+        let settings = SettingsManager.shared
+        var state = AutoCorrectionStatus()
+        state.masterEnabled = settings.autoSwitchEnabled
+        state.enabled = settings.autoConvert
+        state.accessibility = AXIsProcessTrusted()
+        state.keyboard = keyboardMonitor.isTapEnabled
+        state.secureInput = AutoSwitchPolicy.secureInputActive
+        let app = NSWorkspace.shared.frontmostApplication
+        if AutoSwitchPolicy.isDeniedApp(app?.bundleIdentifier) {
+            state.excludedApp = app?.localizedName ?? taskText("current application", "текущее приложение")
+        }
+        state.remoteClient = AutoSwitchPolicy.shouldDeferToRemoteClient
+        if settings.wordEndOnSpace { state.triggers.append(taskText("Space", "пробел")) }
+        if settings.wordEndOnEnter { state.triggers.append("Enter") }
+        if settings.wordEndOnTab { state.triggers.append("Tab") }
+        state.warmedUp = Dict.didWarmUp
+        if let langs = LayoutSwitcher.currentAndOppositeLanguage(), langs.current != langs.opposite {
+            state.languagesKnown = true
+            // Hebrew uses its own detector; the other side still needs a dictionary.
+            let required = LayoutDetector.isHebrew(langs.opposite) ? langs.current : langs.opposite
+            if Dict.didWarmUp, !Dict.isAvailable(required) {
+                state.missingDictionary = Locale(identifier: L10n.languageCode)
+                    .localizedString(forLanguageCode: required) ?? required.uppercased()
+            }
+        }
+        return state.message
+    }
 
     /// Пункты списка раскладок: «флаг + локализованное имя», галочка на текущей.
     private func layoutMenuItems() -> [NSMenuItem] {
@@ -1075,7 +1137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenuPasteTarget = NSWorkspace.shared.frontmostApplication
         menu.item(withTag: Self.permissionsItemTag)?.isHidden = permissionsGranted
         menu.item(withTag: Self.updateItemTag)?.title = UpdateChecker.menuTitle
-        let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 2 : 0)
+        menu.item(withTag: Self.autoCorrectionStatusTag)?.title = automaticCorrectionStatus
+        let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 3 : 2)
         for old in menu.items where old.tag == Self.layoutItemTag { menu.removeItem(old) }
         for (offset, item) in layoutMenuItems().enumerated() {
             menu.insertItem(item, at: insertAt + offset)
@@ -1289,6 +1352,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.showWindow()
     }
 
+    @objc private func openQuickTasks() {
+        DispatchQueue.main.async { [weak self] in self?.quickTasks.show() }
+    }
+
     @objc private func openClipboardHistory() {
         let target = statusMenuPasteTarget
         DispatchQueue.main.async { [weak self] in self?.clipboardHistory.show(for: target) }
@@ -1424,6 +1491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         iconRefreshTimer?.invalidate()
         clipboardHistory.stop()
+        quickTasks.stop()
         // Не теряем буфер обмена в 2-секундном окне отложенного восстановления
         // (актуально и при само-обновлении, которое завершает процесс).
         textConverter.flushPendingClipboardRestore()

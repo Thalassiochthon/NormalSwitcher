@@ -24,6 +24,11 @@ final class SettingsWindowController {
     var onRemoteDesktopChanged: ((Bool) -> Void)?
     var onCaretFlagChanged: ((Bool) -> Void)?
     var onHideIconChanged: ((Bool) -> Void)?
+    var taskShortcutAvailable: ((TaskShortcut) -> Bool)?
+    var onTaskShortcutChanged: ((TaskShortcut, ClipboardHistoryShortcut) -> Bool)?
+    var onTaskShortcutEnabled: ((TaskShortcut, Bool) -> Bool)?
+    var onOpenTasks: (() -> Void)?
+    private var taskShortcutButtons: [TaskShortcut: NSButton] = [:]
     var onClipboardHistoryChanged: (() -> Void)?
     var onClipboardHistoryPersistenceChanged: (() -> Void)?
     var onClipboardHistoryShortcutChanged: ((ClipboardHistoryShortcut) -> Bool)?
@@ -34,12 +39,14 @@ final class SettingsWindowController {
     var onShare: ((NSButton) -> Void)?
 
     func showWindow() {
-        if let window {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
+        let win = window ?? makeWindow()
+        window = win
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
+    /// Construct without activating so layout can be exercised with synthetic UI tests.
+    func makeWindow() -> NSWindow {
         let tabs = NSTabViewController()
         tabs.tabStyle = .toolbar
         tabs.transitionOptions = []
@@ -70,10 +77,7 @@ final class SettingsWindowController {
         win.isReleasedWhenClosed = false
         win.setContentSize(NSSize(width: 660, height: min(540, max(300, screenHeight - 120))))
         win.center()
-        win.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-
-        window = win
+        return win
     }
 
     func updateAutoConvertState(_ enabled: Bool) {
@@ -139,7 +143,7 @@ final class SettingsWindowController {
         return popup
     }
 
-    private func row(_ label: NSTextField, _ control: NSView) -> NSStackView {
+    private func row(_ label: NSView, _ control: NSView) -> NSStackView {
         let row = NSStackView(views: [label, control])
         row.orientation = .horizontal
         row.alignment = .centerY
@@ -419,12 +423,30 @@ final class SettingsWindowController {
                                 #selector(clipboardHistoryPersistenceChanged(_:)))
         persistence.isEnabled = enabled
         clipboardHistoryPersistenceCheckbox = persistence
+        taskShortcutButtons.removeAll()
+        let taskRows = TaskShortcut.allCases.map { action in
+            let shortcutButton = button(taskShortcutTitle(action), #selector(recordTaskShortcut(_:)))
+            shortcutButton.tag = Int(action.rawValue)
+            shortcutButton.setAccessibilityLabel(action.label)
+            taskShortcutButtons[action] = shortcutButton
+            let enabled = check(action.label, action.enabled, #selector(taskShortcutEnabledChanged(_:)))
+            enabled.tag = Int(action.rawValue)
+            return row(enabled, shortcutButton)
+        }
+        let tasksHeading = NSTextField(labelWithString: taskText("Tasks", "Задачи"))
+        tasksHeading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         return scrollable([
             check(L10n.clipboardHistoryEnabled, enabled, #selector(clipboardHistoryChanged(_:))),
             hint(String(format: L10n.settingsClipboardHistoryLimit, ClipboardHistory.limit)),
             row(NSTextField(wrappingLabelWithString: L10n.settingsOpenClipboardHistory), shortcut),
-            NSBox.separator(), persistence, hint(L10n.clipboardHistoryPersistenceHint),
-        ])
+            NSBox.separator(), persistence, hint(taskText(
+                "History is encrypted on this Mac. Its key is kept in Keychain. Turning this off removes saved history; tasks stay saved.",
+                "История хранится на этом Mac в зашифрованном виде. Ключ — в Связке ключей. При отключении сохранённая история удаляется, задачи остаются.")),
+            NSBox.separator(),
+            row(tasksHeading, button(taskText("Open Tasks", "Открыть задачи"), #selector(openTasksFromSettings))),
+            hint(taskText("Save clipboard text as a task, even when clipboard history is off. Uncheck an action to disable its shortcut.",
+                          "Сохраняйте текст из буфера как задачу, даже если история выключена. Снимите галочку, чтобы отключить сочетание клавиш.")),
+        ] + taskRows)
     }
 
     private func createAdvancedTab() -> NSView {
@@ -511,11 +533,58 @@ final class SettingsWindowController {
     }
 
     @objc private func recordClipboardHistoryShortcut(_ sender: NSButton) {
+        guard let shortcut = recordShortcut(prompt: L10n.clipboardHistoryShortcutPrompt,
+                                            defaultShortcut: .standard,
+                                            resetTitle: L10n.clipboardHistoryShortcutReset) else { return }
+        if onClipboardHistoryShortcutChanged?(shortcut) == true {
+            sender.title = clipboardHistoryShortcutTitle
+        } else {
+            showShortcutUnavailable()
+        }
+    }
+
+    private func taskShortcutTitle(_ action: TaskShortcut) -> String {
+        let title = action.shortcut.title
+        guard action.enabled else { return title }
+        return taskShortcutAvailable?(action) == true ? title :
+            title + taskText(" (Unavailable)", " (недоступно)")
+    }
+
+    @objc private func openTasksFromSettings() { onOpenTasks?() }
+
+    @objc private func taskShortcutEnabledChanged(_ sender: NSButton) {
+        guard let action = TaskShortcut(rawValue: UInt32(sender.tag)) else { return }
+        if onTaskShortcutEnabled?(action, sender.state == .on) != true {
+            sender.state = action.enabled ? .on : .off
+            showShortcutUnavailable()
+        }
+        taskShortcutButtons[action]?.title = taskShortcutTitle(action)
+    }
+
+    @objc private func recordTaskShortcut(_ sender: NSButton) {
+        guard let action = TaskShortcut(rawValue: UInt32(sender.tag)),
+              let shortcut = recordShortcut(prompt: action.label, defaultShortcut: action.standard,
+                                            resetTitle: taskText("Use Default", "По умолчанию"),
+                                            hint: taskText("Include Control or Option. Press Esc to cancel.",
+                                                           "Добавьте Control или Option. Esc отменяет выбор.")) else { return }
+        if onTaskShortcutChanged?(action, shortcut) != true { showShortcutUnavailable() }
+        sender.title = taskShortcutTitle(action)
+    }
+
+    private func showShortcutUnavailable() {
+        let warning = NSAlert()
+        warning.messageText = L10n.clipboardHistoryShortcutUnavailable
+        warning.runModal()
+    }
+
+    private func recordShortcut(prompt: String, defaultShortcut: ClipboardHistoryShortcut,
+                                resetTitle: String, hint: String = L10n.clipboardHistoryShortcutHint)
+        -> ClipboardHistoryShortcut? {
         let alert = NSAlert()
-        alert.messageText = L10n.clipboardHistoryShortcutPrompt
-        alert.informativeText = L10n.clipboardHistoryShortcutHint
+        alert.messageText = prompt
+        alert.informativeText = hint
         alert.addButton(withTitle: L10n.commonCancel).keyEquivalent = "\u{1b}"
-        alert.addButton(withTitle: L10n.clipboardHistoryShortcutReset)
+        alert.addButton(withTitle: resetTitle)
 
         var captured: ClipboardHistoryShortcut?
         let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -535,15 +604,7 @@ final class SettingsWindowController {
         let response = alert.runModal()
         if let monitor { NSEvent.removeMonitor(monitor) }
         alert.window.orderOut(nil)
-        let shortcut = response == .alertSecondButtonReturn ? .standard : captured
-        guard let shortcut else { return }
-        if onClipboardHistoryShortcutChanged?(shortcut) == true {
-            sender.title = clipboardHistoryShortcutTitle
-        } else {
-            let warning = NSAlert()
-            warning.messageText = L10n.clipboardHistoryShortcutUnavailable
-            warning.runModal()
-        }
+        return response == .alertSecondButtonReturn ? defaultShortcut : captured
     }
 
     @objc private func hideIconChanged(_ sender: NSButton) {

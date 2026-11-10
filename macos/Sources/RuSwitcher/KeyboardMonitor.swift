@@ -46,6 +46,7 @@ func rslog(_ msg: String) {
 final class KeyboardMonitor: @unchecked Sendable {
     fileprivate var eventTap: CFMachPort?
     var isRunning: Bool { eventTap != nil }
+    var isTapEnabled: Bool { eventTap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false }
     private var runLoopSource: CFRunLoopSource?
     private var receivedKeyDown = false
 

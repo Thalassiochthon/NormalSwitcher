@@ -221,9 +221,10 @@ final class TextConverter {
         let normalized = Self.normalizedForInsert(insert)
         rslog("replaceTail: del=\(deleteCount)+\(extra) ins=\(insert.count) key=\(repostKey != nil)")
         let bySelection = extra == 0 && eraseBySelection(count: deleteCount, insert: normalized)
+        let totalDeleteCount = deleteCount + extra
         injectQueue.async { [weak self] in
             guard let self else { return }
-            self.erase(deleteCount + extra, bySelection: bySelection)
+            self.erase(totalDeleteCount, bySelection: bySelection)
             usleep(8_000)
             self.insertText(normalized)
             if let k = repostKey {
@@ -504,11 +505,12 @@ final class TextConverter {
         isConverting = true
         rslog("case: buffer \(original.count) chars → variant \(idx), bs \(bs)")
         let bySelection = eraseBySelection(count: bs, insert: changed)
+        let replacement = changed
         injectQueue.async { [weak self] in
             guard let self else { return }
             self.erase(bs, bySelection: bySelection)
             usleep(20_000)
-            self.insertText(changed)
+            self.insertText(replacement)
             Task { @MainActor in self.isConverting = false }
         }
         return true
