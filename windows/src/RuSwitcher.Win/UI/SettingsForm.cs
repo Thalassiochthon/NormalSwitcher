@@ -162,7 +162,7 @@ internal sealed class SettingsForm : Form
             persist.Enabled = enabled.Checked;
         };
         var tasks = new Button { Text = L10n.T("tasks.title"), AutoSize = true };
-        tasks.Click += (_, _) => { Close(); openTasks?.Invoke(); };
+        tasks.Click += (_, _) => { openTasks?.Invoke(); Close(); };
         AddPage("clipboard", enabled, shortcut, persist, tasks,
             Hint("clipboard.hint"));
 

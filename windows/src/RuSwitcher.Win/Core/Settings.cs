@@ -58,11 +58,7 @@ public sealed class Settings
     public bool WordEndOnTab { get; set; }
     public Dictionary<string, string> Abbreviations { get; set; } = new(StringComparer.Ordinal);
     public bool TaskShortcutsInitialized { get; set; }
-    public Dictionary<ShortcutAction, KeyChord> GlobalShortcuts { get; set; } = new(); set; } = new()
-    {
-        [ShortcutAction.OpenTasks] = new(0x54, 6),
-        [ShortcutAction.CaptureTask] = new(0x56, 7)
-    };
+    public Dictionary<ShortcutAction, KeyChord> GlobalShortcuts { get; set; } = new();
     public bool KeyboardEnabled { get; set; } = true;
     public bool HideTrayIcon { get; set; }
     public bool MonochromeTray { get; set; }

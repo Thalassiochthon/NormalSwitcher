@@ -155,9 +155,9 @@ internal static class Program
             if (request is not { } word) return;
             bool deferred = word.DeferredKey != 0;
             string tail = KeyMapper.ConvertWord(word.Tail, word.Target.Layout);
-            if (tail.Length != word.Tail.Count) return;
             try
             {
+                if (tail.Length != word.Tail.Count) return;
                 if (await AutoConverter.TryConvertWordAsync(word.Keys, word.Target,
                         () => settings.HasAutomaticEdits && CanEdit(word.Target, word.Generation, checkLayout: true),
                         deferred ? "" : " " + tail, preserveLayout: tail.Length > 0))
@@ -195,7 +195,9 @@ internal static class Program
         tray.SettingsRequested += () =>
         {
             if (currentSettings != null) { currentSettings.Activate(); return; }
-            using var form = new UI.SettingsForm(tray.ClipboardHistory, tray.Shortcuts, logPath, keyboardHookReady, OpenTasks);
+            bool openTasksAfterSettings = false;
+            using var form = new UI.SettingsForm(tray.ClipboardHistory, tray.Shortcuts, logPath, keyboardHookReady,
+                () => openTasksAfterSettings = true);
             currentSettings = form;
             form.AppearanceChanged += tray.RefreshAppearance;
             form.KeyboardEnabledChanged += tray.SetEnabled;
@@ -203,6 +205,7 @@ internal static class Program
             form.SwitchChanged += () => switchDetector.Kind = settings.SwitchTrigger;
             try { form.ShowDialog(); } // modal; the message loop keeps pumping the hook + tray
             finally { currentSettings = null; }
+            if (openTasksAfterSettings) OpenTasks();
         };
         tray.QuitRequested += () => Log("quit requested");
         tray.Show("NormalSwitcher");
