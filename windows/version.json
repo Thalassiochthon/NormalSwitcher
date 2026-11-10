@@ -1,6 +1,6 @@
 {
-  "version": "0.2.5",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.5",
-  "notes": "Новые версии отмечаются в меню NormalSwitcher. Фоновая проверка больше не открывает окно, а установка по-прежнему начинается после подтверждения.\n\nNew versions appear in the NormalSwitcher menu. Background checks no longer open a window, and installation still requires confirmation.",
-  "sha256": "05bec8f6a359e8c44ee2f4216b7bc92dc285e3af446ad2be3cfa435b939feabb"
+  "version": "0.2.6",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.6",
+  "notes": "Восемь коротких звуков NormalSwitcher для смены раскладки и предпрослушивания. Звучание не зависит от системной звуковой схемы.\n\nEight short NormalSwitcher layout cues for switching and preview, independent of the system sound scheme.",
+  "sha256": "b7eaefa904a0a39c8a8d4e7158249719654f7d1881e423ea2981f5e2e63d6aa0"
 }
