@@ -1,8 +1,8 @@
 {
-  "version": "1.1.4",
-  "build": "74",
+  "version": "1.1.5",
+  "build": "75",
   "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.4",
-  "notes": "Новые версии отмечаются в меню NormalSwitcher. Фоновая проверка больше не открывает окно, а установка по-прежнему начинается после подтверждения.\n\nNew versions appear in the NormalSwitcher menu. Background checks no longer open a window, and installation still requires confirmation.\n",
-  "sha256": "ca585c2d964076b581f69e0b9f4d666855b3acb6a5bfb86ff1b2b7556abe70e3"
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.5",
+  "notes": "В быстром меню буфера обмена теперь восемь последних записей. Пункт «Вся история…» открывает полный список с поиском.\n\nThe clipboard menu now shows the eight most recent entries. All History opens the full, searchable list.\n",
+  "sha256": "000491d63d4b10934fe9d638e74afcabaf48ace0f4df6a67fd674290950a542e"
 }
