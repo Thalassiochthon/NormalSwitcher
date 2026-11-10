@@ -63,7 +63,7 @@ internal sealed class AppLayoutTracker : IDisposable
     }
 
     /// <summary>Lower-cased executable base name (no ".exe") of the process owning a window.</summary>
-    private static string? ProcessName(IntPtr hwnd)
+    internal static string? ProcessName(IntPtr hwnd)
     {
         GetWindowThreadProcessId(hwnd, out uint pid);
         if (pid == 0) return null;

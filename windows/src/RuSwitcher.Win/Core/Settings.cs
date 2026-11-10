@@ -38,6 +38,8 @@ public sealed class Settings
     /// trigger teaches an exception (learn-from-undo).</summary>
     public bool AutoConvert { get; set; } = false;
 
+    public List<string> ExcludedApps { get; set; } = new();
+
     /// <summary>Words never auto-converted (typed form, lowercase). Grown by learn-from-undo.</summary>
     public List<string> NeverConvert { get; set; } = new();
 

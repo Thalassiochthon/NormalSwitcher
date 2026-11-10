@@ -20,6 +20,10 @@ internal static class AutoConverter
     public static bool TryConvertWord(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent)
     {
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
+        if (Settings.Current.ExcludedApps.Count > 0
+            && AppLayoutTracker.ProcessName(input.Foreground) is { } process
+            && Settings.Current.ExcludedApps.Contains(process, StringComparer.OrdinalIgnoreCase))
+            return false;
 
         IntPtr sourceHkl = input.Layout;
         string typed = KeyMapper.ConvertWord(keys, sourceHkl);

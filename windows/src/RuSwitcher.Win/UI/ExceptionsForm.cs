@@ -12,6 +12,7 @@ internal sealed class ExceptionsForm : Form
 {
     private readonly TextBox _never;
     private readonly TextBox _always;
+    private readonly TextBox _apps;
 
     public ExceptionsForm()
     {
@@ -22,7 +23,7 @@ internal sealed class ExceptionsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(460, 320);
+        ClientSize = new Size(686, 320);
 
         var lblNever = new Label { Text = L10n.T("exc.never"), Left = 16, Top = 12, AutoSize = true };
         _never = MakeList(16, s.NeverConvert);
@@ -30,18 +31,24 @@ internal sealed class ExceptionsForm : Form
         var lblAlways = new Label { Text = L10n.T("exc.always"), Left = 236, Top = 12, AutoSize = true };
         _always = MakeList(236, s.AlwaysConvert);
 
-        var btnOk = new Button { Text = L10n.T("exc.save"), Left = 270, Top = 280, Width = 84, DialogResult = DialogResult.OK };
-        var btnCancel = new Button { Text = L10n.T("exc.cancel"), Left = 364, Top = 280, Width = 84, DialogResult = DialogResult.Cancel };
+        var lblApps = new Label { Text = L10n.T("exc.apps"), Left = 456, Top = 12, AutoSize = true };
+        _apps = MakeList(456, s.ExcludedApps);
+
+        var btnOk = new Button { Text = L10n.T("exc.save"), Left = 496, Top = 280, Width = 84, DialogResult = DialogResult.OK };
+        var btnCancel = new Button { Text = L10n.T("exc.cancel"), Left = 590, Top = 280, Width = 84, DialogResult = DialogResult.Cancel };
         AcceptButton = btnOk;
         CancelButton = btnCancel;
         btnOk.Click += (_, _) =>
         {
             s.NeverConvert = Parse(_never.Text);
             s.AlwaysConvert = Parse(_always.Text);
+            s.ExcludedApps = Parse(_apps.Text)
+                .Select(app => app.EndsWith(".exe") ? app[..^4] : app)
+                .Where(app => app.Length > 0).Distinct().ToList();
             s.Save();
         };
 
-        Controls.AddRange(new Control[] { lblNever, _never, lblAlways, _always, btnOk, btnCancel });
+        Controls.AddRange(new Control[] { lblNever, _never, lblAlways, _always, lblApps, _apps, btnOk, btnCancel });
     }
 
     private static TextBox MakeList(int left, System.Collections.Generic.IEnumerable<string> items) => new()
