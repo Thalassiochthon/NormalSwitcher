@@ -9,6 +9,16 @@ namespace RuSwitcher.Win.UI;
 /// <summary>Settings shared with the tray and the running keyboard detectors.</summary>
 internal sealed class SettingsForm : Form
 {
+    private readonly TableLayoutPanel _navigation;
+    private readonly Panel _pages;
+    private readonly Label _heading;
+    private readonly Color _accent = SystemInformation.HighContrast ? SystemColors.HotTrack : Color.FromArgb(91, 52, 166);
+    private readonly Color _selected = SystemInformation.HighContrast ? SystemColors.Highlight : Color.FromArgb(233, 224, 253);
+    private readonly Color _navigationSurface = SystemInformation.HighContrast ? SystemColors.Window : Color.FromArgb(246, 243, 251);
+    private readonly List<(Button Button, Panel Page)> _sections = new();
+    private Bitmap? _aboutIcon;
+    private int _activeSection;
+
     public event Action<TriggerKind>? TriggerChanged;
     public event Action? SwitchChanged;
     public event Action? AppearanceChanged;
@@ -22,10 +32,50 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(520, 296);
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Font = new Font("Segoe UI", 10F);
+        ClientSize = new Size(760, 570);
+        BackColor = SystemColors.Window;
+        ForeColor = SystemColors.WindowText;
+        Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
+        SuspendLayout();
 
-        var tabs = new TabControl { Dock = DockStyle.Fill };
+        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 194));
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        Controls.Add(shell);
+
+        var sidebar = new Panel
+        {
+            Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = _navigationSurface,
+            Padding = new Padding(12, 26, 12, 12)
+        };
+        shell.Controls.Add(sidebar, 0, 0);
+        _navigation = Stack();
+        sidebar.Controls.Add(_navigation);
+        var brand = TextLabel("NormalSwitcher", 11, FontStyle.Bold);
+        brand.Padding = new Padding(8, 0, 0, 18);
+        brand.ForeColor = _accent;
+        _navigation.Controls.Add(brand);
+
+        var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
+        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+        shell.Controls.Add(content, 1, 0);
+
+        _heading = TextLabel("", 22, FontStyle.Bold);
+        _heading.Dock = DockStyle.Fill;
+        _heading.TextAlign = ContentAlignment.MiddleLeft;
+        _heading.Padding = new Padding(26, 0, 0, 0);
+        _heading.AccessibleRole = AccessibleRole.StaticText;
+        content.Controls.Add(_heading, 0, 0);
+        _pages = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+        content.Controls.Add(_pages, 0, 1);
+
         IntPtr[] layouts = [IntPtr.Zero, .. LayoutSwitcher.Installed()];
         string[] layoutNames = [L10n.T("settings.layout.auto"), .. layouts.Skip(1).Select(LayoutIcon.Name)];
         AddPage("general",
@@ -37,7 +87,7 @@ internal sealed class SettingsForm : Form
                 index => { s.FirstLayout = layouts[index].ToInt64(); s.Save(); }),
             Choice("settings.layout.second", layoutNames, Array.IndexOf(layouts, new IntPtr(s.SecondLayout)),
                 index => { s.SecondLayout = layouts[index].ToInt64(); s.Save(); }),
-            new Label { Text = L10n.T("settings.layout.hint"), MaximumSize = new Size(440, 0), AutoSize = true },
+            Hint("settings.layout.hint"),
             Choice("settings.language", [L10n.T("settings.layout.auto"), "English", "Русский"],
                 Array.IndexOf(new[] { "", "en", "ru" }, s.UiLanguage), index =>
                 {
@@ -71,13 +121,15 @@ internal sealed class SettingsForm : Form
         abbreviations.Click += (_, _) => { using var form = new AbbreviationsForm(); form.ShowDialog(this); };
         AddPage("automatic",
             Check("settings.auto", s.AutoConvert, value => { s.AutoConvert = value; s.Save(); }),
+            Section("settings.group.wordEnd"),
             Check("settings.wordEnd.space", s.WordEndOnSpace, value => { s.WordEndOnSpace = value; s.Save(); }),
             Check("settings.wordEnd.enter", s.WordEndOnEnter, value => { s.WordEndOnEnter = value; s.Save(); }),
             Check("settings.wordEnd.tab", s.WordEndOnTab, value => { s.WordEndOnTab = value; s.Save(); }),
+            Section("settings.group.text"),
             Check("settings.fixCaps", s.FixTwoCaps, value => { s.FixTwoCaps = value; s.Save(); }),
             Check("settings.fixTypos", s.FixTypos, value => { s.FixTypos = value; s.Save(); }),
             Check("settings.frequencyWords", s.ExtendedDictionary, value => { s.ExtendedDictionary = value; s.Save(); }),
-            abbreviations, exceptions);
+            Actions(abbreviations, exceptions));
 
         var persist = new CheckBox
         {
@@ -104,7 +156,7 @@ internal sealed class SettingsForm : Form
             persist.Enabled = enabled.Checked;
         };
         AddPage("clipboard", enabled, shortcut, persist,
-            new Label { Text = L10n.T("clipboard.hint"), MaximumSize = new Size(440, 0), AutoSize = true });
+            Hint("clipboard.hint"));
 
         var openLog = new Button { Text = L10n.T("settings.log.open"), AutoSize = true };
         openLog.Click += (_, _) =>
@@ -129,24 +181,31 @@ internal sealed class SettingsForm : Form
             Check("settings.updates", s.CheckUpdatesEnabled, value => { s.CheckUpdatesEnabled = value; s.Save(); }),
             Check("settings.remote", s.RemoteDesktopMode, value => { s.RemoteDesktopMode = value; s.Save(); }),
             Check("settings.log.enable", s.DebugLogging, value => { s.DebugLogging = value; s.Save(); }),
-            checkAccess, openLog);
+            Actions(checkAccess, openLog));
 
         AddPage("about",
-            new Label { Text = $"NormalSwitcher {Updater.Current.ToString(3)}", AutoSize = true },
-            Link("github.com/antonjas/NormalSwitcher", "https://github.com/antonjas/NormalSwitcher"),
+            AboutHeader(),
+            Hint("settings.about.description"),
+            Section("settings.about.project"),
+            Link(L10n.T("settings.about.github"), "https://github.com/antonjas/NormalSwitcher"),
+            Link(L10n.T("settings.about.releases"), "https://github.com/antonjas/NormalSwitcher/releases"),
+            Section("settings.about.credits"),
             Link(L10n.T("settings.credit"), "https://github.com/rashn/RuSwitcher"),
             Link("FrequencyWords · CC BY-SA 4.0", "https://github.com/antonjas/NormalSwitcher/blob/personal/dicts/LICENSE"));
 
-        var close = new Button { Text = L10n.T("settings.close"), AutoSize = true, DialogResult = DialogResult.OK };
+        var close = new Button { Text = L10n.T("settings.close"), AutoSize = true, DialogResult = DialogResult.OK,
+            MinimumSize = new Size(106, 32) };
         var footer = new FlowLayoutPanel
         {
-            Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(8)
+            Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(20, 12, 22, 0), Margin = Padding.Empty
         };
         footer.Controls.Add(close);
         CancelButton = close;
-        Controls.Add(tabs);
-        Controls.Add(footer);
+        content.Controls.Add(footer, 0, 2);
+
+        SelectSection(0);
+        ResumeLayout(performLayout: true);
 
         void SetAppearance(Action change)
         {
@@ -158,22 +217,152 @@ internal sealed class SettingsForm : Form
         void ShowClipboardError(string key) =>
             MessageBox.Show(this, L10n.T(key), L10n.T("settings.title"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
-        void AddPage(string name, params Control[] controls)
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        FitWorkingArea();
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        FitWorkingArea();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData is not (Keys.Control | Keys.Tab) and not (Keys.Control | Keys.Shift | Keys.Tab))
+            return base.ProcessCmdKey(ref msg, keyData);
+
+        int direction = keyData.HasFlag(Keys.Shift) ? -1 : 1;
+        int index = (_activeSection + direction + _sections.Count) % _sections.Count;
+        SelectSection(index);
+        _sections[index].Button.Focus();
+        return true;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _aboutIcon?.Dispose();
+        base.Dispose(disposing);
+    }
+
+    private void FitWorkingArea()
+    {
+        var area = Screen.FromControl(this).WorkingArea;
+        var preferred = SizeFromClientSize(LogicalToDeviceUnits(new Size(760, 570)));
+        Size = new Size(Math.Min(preferred.Width, area.Width), Math.Min(preferred.Height, area.Height));
+        Location = new Point(
+            Math.Clamp(Left, area.Left, area.Right - Width),
+            Math.Clamp(Top, area.Top, area.Bottom - Height));
+    }
+
+    private void AddPage(string name, params Control[] controls)
+    {
+        int index = _sections.Count;
+        var button = new Button
         {
-            var page = new TabPage(L10n.T("settings.tab." + name)) { UseVisualStyleBackColor = true };
-            var stack = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false,
-                AutoScroll = true, Padding = new Padding(16)
-            };
-            foreach (var control in controls)
-            {
-                control.Margin = new Padding(0, 0, 0, 10);
-                stack.Controls.Add(control);
-            }
-            page.Controls.Add(stack);
-            tabs.TabPages.Add(page);
+            Text = L10n.T("settings.tab." + name), TextAlign = ContentAlignment.MiddleLeft,
+            Height = 39, Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 3),
+            FlatStyle = FlatStyle.Flat, Padding = new Padding(9, 0, 3, 0),
+            UseVisualStyleBackColor = false
+        };
+        button.FlatAppearance.BorderSize = 0;
+        button.Click += (_, _) => SelectSection(index);
+        _navigation.Controls.Add(button);
+
+        var page = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Visible = false, Name = name };
+        var stack = Stack();
+        stack.Padding = new Padding(26, 4, 24, 6);
+        foreach (var control in controls)
+        {
+            control.Margin = new Padding(0, 0, 0, 8);
+            control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            stack.Controls.Add(control);
         }
+        // Reserve a scrollbar gutter so text has the same wrap width when it appears.
+        void WrapRows()
+        {
+            int width = Math.Max(1, page.ClientSize.Width - stack.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth);
+            foreach (var row in controls)
+                row.MaximumSize = new Size(width, 0);
+        }
+        page.ClientSizeChanged += (_, _) => WrapRows();
+        page.DpiChangedAfterParent += (_, _) => WrapRows();
+        page.Controls.Add(stack);
+        _pages.Controls.Add(page);
+        _sections.Add((button, page));
+    }
+
+    private void SelectSection(int index)
+    {
+        _activeSection = index;
+        foreach (var (button, page) in _sections)
+        {
+            bool active = ReferenceEquals(page, _sections[index].Page);
+            page.Visible = active;
+            button.BackColor = active ? _selected : _navigationSurface;
+            button.ForeColor = active
+                ? SystemInformation.HighContrast ? SystemColors.HighlightText : _accent
+                : SystemColors.WindowText;
+        }
+        _heading.Text = _sections[index].Button.Text;
+    }
+
+    private static TableLayoutPanel Stack()
+    {
+        var stack = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1, GrowStyle = TableLayoutPanelGrowStyle.AddRows, Margin = Padding.Empty
+        };
+        stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return stack;
+    }
+
+    private static Label TextLabel(string text, float size, FontStyle style = FontStyle.Regular) =>
+        new() { Text = text, AutoSize = true, Font = new Font("Segoe UI", size, style) };
+
+    private Label Section(string key)
+    {
+        var title = TextLabel(L10n.T(key), 10, FontStyle.Bold);
+        title.ForeColor = _accent;
+        title.Padding = new Padding(0, 9, 0, 1);
+        return title;
+    }
+
+    private static Label Hint(string key) => new()
+    {
+        Text = L10n.T(key), AutoSize = true, ForeColor = SystemColors.WindowText
+    };
+
+    private Control AboutHeader()
+    {
+        _aboutIcon = Icon?.ToBitmap();
+        var header = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Padding = new Padding(0, 2, 0, 10) };
+        var logo = new PictureBox
+        {
+            Image = _aboutIcon, Size = new Size(64, 64), SizeMode = PictureBoxSizeMode.Zoom,
+            Margin = new Padding(0, 0, 16, 0)
+        };
+        var details = new FlowLayoutPanel
+        {
+            AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.TopDown,
+            Padding = new Padding(0, 4, 0, 0)
+        };
+        details.Controls.Add(TextLabel("NormalSwitcher", 17, FontStyle.Bold));
+        details.Controls.Add(TextLabel(L10n.T("settings.about.version", Updater.Current.ToString(3)), 10));
+        header.Controls.AddRange([logo, details]);
+        return header;
+    }
+
+    private static Control Actions(params Button[] buttons)
+    {
+        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = true };
+        row.Controls.AddRange(buttons);
+        return row;
     }
 
     private Control ShortcutButton(string key, Func<KeyChord?> current, Func<KeyChord?, bool> save)
@@ -214,9 +403,9 @@ internal sealed class SettingsForm : Form
         return row;
     }
 
-    private static LinkLabel Link(string title, string url)
+    private LinkLabel Link(string title, string url)
     {
-        var link = new LinkLabel { Text = title, AutoSize = true };
+        var link = new LinkLabel { Text = title, AutoSize = true, LinkColor = _accent };
         link.LinkClicked += (_, _) =>
         {
             try { using var browser = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
