@@ -12,7 +12,7 @@ internal sealed class SettingsForm : Form
     public event Action<TriggerKind>? TriggerChanged;
     public event Action? SwitchChanged;
 
-    public SettingsForm()
+    public SettingsForm(ClipboardHistory history)
     {
         var s = Settings.Current;
         Text = L10n.T("settings.title");
@@ -52,6 +52,35 @@ internal sealed class SettingsForm : Form
             Check("settings.auto", s.AutoConvert, value => { s.AutoConvert = value; s.Save(); }),
             exceptions);
 
+        var persist = new CheckBox
+        {
+            Text = L10n.T("clipboard.persist"), AutoSize = true,
+            Checked = s.ClipboardHistoryPersistent, Enabled = s.ClipboardHistoryEnabled,
+        };
+        persist.Click += (_, _) =>
+        {
+            if (!history.SetPersistence(persist.Checked))
+            {
+                persist.Checked = s.ClipboardHistoryPersistent;
+                ShowClipboardError("clipboard.storageError");
+            }
+        };
+        var shortcuts = new[] { "Ctrl + Shift + V", "Alt + Shift + V", "Ctrl + Alt + V" };
+        var shortcut = Choice("clipboard.shortcut", shortcuts, (int)s.ClipboardHistoryShortcut,
+            index => history.SetShortcut((ClipboardShortcut)index), () => ShowClipboardError("clipboard.hotkeyError"));
+        var enabled = new CheckBox { Text = L10n.T("clipboard.enable"), AutoSize = true, Checked = s.ClipboardHistoryEnabled };
+        enabled.Click += (_, _) =>
+        {
+            if (!history.SetEnabled(enabled.Checked))
+            {
+                enabled.Checked = s.ClipboardHistoryEnabled;
+                ShowClipboardError("clipboard.storageError");
+            }
+            persist.Enabled = enabled.Checked;
+        };
+        AddPage("clipboard", enabled, shortcut, persist,
+            new Label { Text = L10n.T("clipboard.hint"), MaximumSize = new Size(440, 0), AutoSize = true });
+
         AddPage("advanced",
             Check("settings.wholeline", s.ConvertWholeLine, value => { s.ConvertWholeLine = value; s.Save(); }),
             Check("settings.smart", s.SmartConversion, value => { s.SmartConversion = value; s.Save(); }),
@@ -72,6 +101,9 @@ internal sealed class SettingsForm : Form
         CancelButton = close;
         Controls.Add(tabs);
         Controls.Add(footer);
+
+        void ShowClipboardError(string key) =>
+            MessageBox.Show(this, L10n.T(key), L10n.T("settings.title"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
         void AddPage(string name, params Control[] controls)
         {
@@ -98,14 +130,25 @@ internal sealed class SettingsForm : Form
         return check;
     }
 
-    private static Control Choice(string key, string[] options, int selected, Action<int> onChange)
+    private static Control Choice(string key, string[] options, int selected, Action<int> onChange) =>
+        Choice(key, options, selected, index => { onChange(index); return true; }, () => { });
+
+    private static Control Choice(string key, string[] options, int selected, Func<int, bool> onChange, Action onFailure)
     {
         var row = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, RowCount = 1 };
         var label = new Label { Text = L10n.T(key), AutoSize = true, Anchor = AnchorStyles.Left };
         var combo = new ComboBox { Width = 210, DropDownStyle = ComboBoxStyle.DropDownList };
         combo.Items.AddRange(options);
-        combo.SelectedIndex = selected;
-        combo.SelectedIndexChanged += (_, _) => onChange(combo.SelectedIndex);
+        combo.SelectedIndex = Math.Clamp(selected, 0, options.Length - 1);
+        combo.SelectionChangeCommitted += (_, _) =>
+        {
+            if (onChange(combo.SelectedIndex)) selected = combo.SelectedIndex;
+            else
+            {
+                combo.SelectedIndex = selected;
+                onFailure();
+            }
+        };
         row.Controls.Add(label, 0, 0);
         row.Controls.Add(combo, 1, 0);
         return row;

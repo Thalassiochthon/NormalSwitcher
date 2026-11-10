@@ -66,11 +66,15 @@ public sealed class Settings
         Converters = { new JsonStringEnumConverter() },
     };
 
+    public bool ClipboardHistoryEnabled { get; set; }
+    public bool ClipboardHistoryPersistent { get; set; }
+    public ClipboardShortcut ClipboardHistoryShortcut { get; set; }
+
     public static Settings Current { get; } = Load();
 
-    private static string Dir =>
+    internal static string DataDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NormalSwitcher");
-    private static string FilePath => Path.Combine(Dir, "settings.json");
+    private static string FilePath => Path.Combine(DataDirectory, "settings.json");
 
     public static Settings Load()
     {
@@ -87,7 +91,7 @@ public sealed class Settings
     {
         try
         {
-            Directory.CreateDirectory(Dir);
+            Directory.CreateDirectory(DataDirectory);
             // Atomic write: serialize to a temp file, then rename over the target. File.Move with
             // overwrite is an atomic MoveFileEx(REPLACE_EXISTING) on the same volume — and avoids the
             // File.Replace backup-file/attribute/AV quirks that were silently failing every save.

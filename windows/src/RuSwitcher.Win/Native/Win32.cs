@@ -248,6 +248,23 @@ internal static class Win32
     public const uint WM_APP = 0x8000;
     public const uint WM_TRAYICON = WM_APP + 1;
     public const uint WM_AUTOCONVERT = WM_APP + 2;   // auto-convert deferred off the LL-hook callback
+    public const uint WM_HOTKEY = 0x0312;
+    public const uint MOD_ALT = 0x0001;
+    public const uint MOD_CONTROL = 0x0002;
+    public const uint MOD_SHIFT = 0x0004;
+    public const uint MOD_NOREPEAT = 0x4000;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetClipboardSequenceNumber();
+
     public const uint WM_LBUTTONUP = 0x0202;
     public const uint WM_RBUTTONUP = 0x0205;
     public const uint WM_COMMAND = 0x0111;

@@ -105,9 +105,15 @@ internal static class Program
             // else whole-line mode → convert the line; else convert the typed word; else the selection.
             bool acted;
             if (Converter.CanReconvert && buffer.IsEmpty) acted = Converter.Reconvert();
-            else if (settings.ConvertWholeLine) { acted = Converter.ConvertLine(settings.SmartConversion); if (acted) buffer.Reset(); }
-            else if (!buffer.IsEmpty) acted = Converter.ConvertLastWord(buffer);
-            else acted = Converter.ConvertSelection(settings.SmartConversion);
+            else if (settings.ConvertWholeLine || buffer.IsEmpty)
+            {
+                tray.ClipboardHistory.Poll();
+                acted = settings.ConvertWholeLine ? Converter.ConvertLine(settings.SmartConversion)
+                    : Converter.ConvertSelection(settings.SmartConversion);
+                tray.ClipboardHistory.SkipCurrent();
+                if (acted) buffer.Reset();
+            }
+            else acted = Converter.ConvertLastWord(buffer);
             if (acted) undoTarget = trigger.Target;
             Log($"trigger: acted={acted}");
         };
@@ -125,13 +131,14 @@ internal static class Program
         tray.EnabledChanged += on => { enabled = on; ResetInput(); Log($"enabled = {on}"); };
         tray.SettingsRequested += () =>
         {
-            using var form = new UI.SettingsForm();
+            using var form = new UI.SettingsForm(tray.ClipboardHistory);
             form.TriggerChanged += kind => detector.Kind = kind;
             form.SwitchChanged += () => switchDetector.Kind = settings.SwitchTrigger;
             form.ShowDialog();   // modal; the message loop keeps pumping the hook + tray
         };
         tray.QuitRequested += () => Log("quit requested");
         tray.Show("NormalSwitcher");
+        tray.ClipboardHistory.Pasted += ResetInput;
 
         // A hidden WinForms control forces a WindowsFormsSynchronizationContext onto this thread, so
         // the background update check can marshal its message box back here (dispatched by our loop).

@@ -14,6 +14,7 @@ internal sealed class TrayIcon : IDisposable
     private const uint ID_SETTINGS = 14;
     private const uint ID_AUTO = 15;
     private const uint ID_UPDATE = 16;
+    private const uint ID_CLIPBOARD = 17;
     private const uint ID_LAYOUT_FIRST = 100;
 
     private readonly WndProc _wndProc;
@@ -27,6 +28,7 @@ internal sealed class TrayIcon : IDisposable
     private uint _taskbarCreated;
     private bool _enabled = true;
 
+    public ClipboardHistory ClipboardHistory { get; private set; } = null!;
     public event Action<bool>? EnabledChanged;
     public event Action? SettingsRequested;
     public event Action? UpdateRequested;
@@ -67,6 +69,8 @@ internal sealed class TrayIcon : IDisposable
         _hwnd = CreateWindowExW(0, "NormalSwitcherTrayWindow", "NormalSwitcher",
             0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
+        ClipboardHistory = new ClipboardHistory(_hwnd);
+        ClipboardHistory.Initialize();
         _tooltip = tooltip;
         _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
         _shownLayout = LayoutSwitcher.Current();
@@ -82,7 +86,11 @@ internal sealed class TrayIcon : IDisposable
             szTip = LayoutTooltip(_shownLayout),
         };
         Shell_NotifyIconW(NIM_ADD, ref _nid);
-        _layoutTimer.Tick += (_, _) => RefreshLayout();
+        _layoutTimer.Tick += (_, _) =>
+        {
+            RefreshLayout();
+            ClipboardHistory.Poll();
+        };
         _layoutTimer.Start();
     }
 
@@ -134,6 +142,10 @@ internal sealed class TrayIcon : IDisposable
                 ShowMenu();
                 return IntPtr.Zero;
 
+            case WM_HOTKEY:
+                if (!_menuOpen) ClipboardHistory.HandleHotkey(wParam);
+                return IntPtr.Zero;
+
             case WM_APP:
                 TriggerActivated?.Invoke();
                 return IntPtr.Zero;
@@ -164,6 +176,8 @@ internal sealed class TrayIcon : IDisposable
             AppendMenuW(menu, MF_SEPARATOR, 0, null);
         AppendMenuW(menu, MF_STRING | Chk(_enabled), ID_ENABLE, L10n.T("tray.enable"));
         AppendMenuW(menu, MF_STRING | Chk(s.AutoConvert), ID_AUTO, L10n.T("tray.auto"));
+        if (s.ClipboardHistoryEnabled)
+            AppendMenuW(menu, MF_STRING, ID_CLIPBOARD, L10n.T("clipboard.title"));
         AppendMenuW(menu, MF_STRING, ID_SETTINGS, L10n.T("tray.settings"));
         AppendMenuW(menu, MF_STRING, ID_UPDATE, L10n.T("tray.update"));
 
@@ -188,6 +202,10 @@ internal sealed class TrayIcon : IDisposable
         switch (command)
         {
             case ID_ENABLE: _enabled = !_enabled; EnabledChanged?.Invoke(_enabled); break;
+            case ID_CLIPBOARD:
+                if (target != IntPtr.Zero) SetForegroundWindow(target);
+                ClipboardHistory.Show();
+                break;
             case ID_SETTINGS: SettingsRequested?.Invoke(); break;
             case ID_UPDATE: UpdateRequested?.Invoke(); break;
             case ID_QUIT: QuitRequested?.Invoke(); PostQuitMessage(0); break;
@@ -207,6 +225,7 @@ internal sealed class TrayIcon : IDisposable
     public void Dispose()
     {
         _layoutTimer.Dispose();
+        ClipboardHistory?.Dispose();
         if (_hwnd != IntPtr.Zero)
         {
             Shell_NotifyIconW(NIM_DELETE, ref _nid);
