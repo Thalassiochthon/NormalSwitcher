@@ -1,8 +1,8 @@
 {
-  "version": "1.1.3",
-  "build": "73",
+  "version": "1.1.4",
+  "build": "74",
   "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.3",
-  "notes": "В настройках теперь можно выбрать и прослушать звук раскладки. Выбор сохраняется между запусками.\n\nChoose and preview a keyboard layout sound in Settings. The selection is saved between launches.\n",
-  "sha256": "59f071837a0a46ff7639722e42eb0fc3a83ae54ba4b718a1c06b386c211d1661"
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.4",
+  "notes": "Новые версии отмечаются в меню NormalSwitcher. Фоновая проверка больше не открывает окно, а установка по-прежнему начинается после подтверждения.\n\nNew versions appear in the NormalSwitcher menu. Background checks no longer open a window, and installation still requires confirmation.\n",
+  "sha256": "ca585c2d964076b581f69e0b9f4d666855b3acb6a5bfb86ff1b2b7556abe70e3"
 }
