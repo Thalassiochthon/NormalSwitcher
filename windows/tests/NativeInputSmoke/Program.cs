@@ -24,8 +24,8 @@ internal static class Program
                 Clipboard.SetText("clipboard fixture");
                 await Task.Delay(650);
                 CheckRegistrationAndDispatch(1, 0x78); // Ctrl + Shift + F9.
-                await Until(IsClipboardMenuOpen, "clipboard menu");
-                Tap(0x28);
+                await Until(() => FindWindowW(null, "Clipboard history…") != IntPtr.Zero, "clipboard menu");
+                await Task.Delay(100);
                 Tap(0x0D);
                 await Until(() => first.Text == "clipboard fixture", "history selection and paste");
 
@@ -114,29 +114,6 @@ internal static class Program
         throw new InvalidOperationException($"Timed out: {scenario}");
     }
 
-    private static bool IsClipboardMenuOpen()
-    {
-        IntPtr tray = FindWindowW("NormalSwitcherTrayWindow", "NormalSwitcher");
-        uint thread = GetWindowThreadProcessId(tray, out _);
-        var info = new ThreadInfo { Size = (uint)Marshal.SizeOf<ThreadInfo>() };
-        return thread != 0 && GetGUIThreadInfo(thread, ref info) && (info.Flags & 0x1C) != 0;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ThreadInfo
-    {
-        public uint Size, Flags;
-        public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
-        public int Left, Top, Right, Bottom;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetGUIThreadInfo(uint thread, ref ThreadInfo info);
-
     private static void TypeShortcutWord()
     {
         Tap(0x5A);
@@ -209,7 +186,7 @@ internal static class Program
     private static extern uint MapVirtualKeyW(uint key, uint mapType);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern IntPtr FindWindowW(string className, string? title);
+    private static extern IntPtr FindWindowW(string? className, string? title);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();

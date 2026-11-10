@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using RuSwitcher.Win.UI;
 using static RuSwitcher.Win.Native.Win32;
 
 namespace RuSwitcher.Win.Core;
@@ -10,7 +11,6 @@ public enum ClipboardShortcut { CtrlShiftV, AltShiftV, CtrlAltV }
 internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDisposable
 {
     private const int HotkeyId = 1;
-    private const int ClearCommand = 100;
     private readonly ClipboardHistoryStore _store = new(Path.Combine(Settings.DataDirectory, "clipboard-history.dat"));
     private readonly List<string> _items = [];
     private uint _sequence = GetClipboardSequenceNumber();
@@ -143,36 +143,15 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         var target = InputTarget.Capture();
         if (target is { IsPasswordEdit: true }) return;
         log($"Clipboard history popup opened (has target: {target != null})");
-        var items = _items.ToArray();
-        IntPtr menu = CreatePopupMenu();
-        if (menu == IntPtr.Zero) return;
-        uint command;
+        using var menu = new ClipboardHistoryMenu(_items.ToArray(), HasError);
         _open = true;
-        try
-        {
-            for (int i = 0; i < items.Length; i++)
-            {
-                string preview = items[i].ReplaceLineEndings(" ").Replace('\t', ' ');
-                if (preview.Length > 80) preview = preview[..80] + "…";
-                AppendMenuW(menu, MF_STRING, (uint)i + 1, preview.Replace("&", "&&"));
-            }
-            if (items.Length == 0)
-                AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L10n.T("clipboard.empty"));
-            if (HasError)
-                AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, L10n.T("clipboard.storageError"));
-            AppendMenuW(menu, MF_SEPARATOR, 0, null);
-            AppendMenuW(menu, MF_STRING, ClearCommand, L10n.T("clipboard.clear"));
-            GetCursorPos(out POINT point);
-            SetForegroundWindow(window);
-            command = TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, point.X, point.Y, 0, window, IntPtr.Zero);
-            PostMessageW(window, 0, IntPtr.Zero, IntPtr.Zero);
-        }
-        finally { DestroyMenu(menu); _open = false; }
+        try { menu.ShowDialog(); }
+        finally { _open = false; }
 
         if (target is { } original) SetForegroundWindow(original.Foreground);
-        if (command == ClearCommand) Clear();
-        else if (command > 0 && command <= items.Length && target is { } expected)
-            _ = PasteAsync(items[command - 1], expected);
+        if (menu.ClearRequested) Clear();
+        else if (menu.Selection is { } selected && target is { } expected)
+            _ = PasteAsync(selected, expected);
     }
 
     private async Task PasteAsync(string text, InputTarget expected)
