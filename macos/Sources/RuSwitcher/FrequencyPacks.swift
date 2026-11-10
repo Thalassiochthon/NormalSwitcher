@@ -56,7 +56,7 @@ final class WordPack: @unchecked Sendable {
 /// по желанию с GitHub, проверяются по sha256 из манифеста, слова проверяются локально.
 @MainActor
 enum FrequencyPacks {
-    static var manifestURL = URL(string: "https://raw.githubusercontent.com/rashn/RuSwitcher/main/dicts/manifest.json")!
+    static var manifestURL = URL(string: "https://raw.githubusercontent.com/antonjas/NormalSwitcher/personal/dicts/manifest.json")!
     /// Не в Caches: оттуда система удаляет файлы сама.
     static var storeDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("RuSwitcher/dicts", isDirectory: true)
