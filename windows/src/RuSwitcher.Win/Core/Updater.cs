@@ -13,7 +13,7 @@ namespace RuSwitcher.Win.Core;
 
 /// <summary>
 /// Installs verified updates through Inno Setup for installed copies. Portable copies continue
-/// to use the download page. Automatic checks are opt-in and throttled to once per day.
+/// to use the download page. Automatic checks are opt-in and update the tray menu without opening a dialog.
 /// </summary>
 internal static class Updater
 {
@@ -33,7 +33,13 @@ internal static class Updater
 
     // Single-flight: repeated tray clicks / an overlapping launch check must not spawn concurrent
     // HTTP checks that each write Settings and stack message boxes.
-    private static int _busy;
+    private static bool _busy;
+    private static bool _showResult;
+
+    private static string? AvailableVersion { get; set; }
+    internal static string MenuTitle => AvailableVersion is { } version
+        ? L10n.T("tray.update.available", version)
+        : L10n.T("tray.update");
 
     private sealed class Feed
     {
@@ -47,39 +53,39 @@ internal static class Updater
     public static Version Current =>
         Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
 
-    /// <summary>Kick off a silent auto-check on launch, on a background task after a short delay,
-    /// respecting the once-a-day throttle and the setting. Never blocks startup.</summary>
+    /// <summary>Checks once shortly after launch and periodically while the app is open.</summary>
     public static void CheckOnLaunch(SynchronizationContext ui)
     {
-        if (!ShouldAutoCheck()) return;
+        if (!Settings.Current.CheckUpdatesEnabled) return;
         _ = Task.Run(async () =>
         {
             await Task.Delay(5000);
-            QueueCheck(silent: true, ui);
+            ui.Post(state =>
+            {
+                if (Settings.Current.CheckUpdatesEnabled) _ = CheckAsync(silent: true);
+            }, null);
         });
     }
 
-    /// <summary>Manual check (from the tray/menu) — always reports the result.</summary>
-    public static void CheckNow(SynchronizationContext ui) => QueueCheck(silent: false, ui);
-
-    private static void QueueCheck(bool silent, SynchronizationContext ui) =>
-        ui.Post(state => { _ = CheckAsync(silent); }, null);
-
-    private static bool ShouldAutoCheck()
+    public static void CheckPeriodic()
     {
-        var s = Settings.Current;
-        if (!s.CheckUpdatesEnabled) return false;
-        if (s.LastUpdateCheckTicks != 0)
-        {
-            var last = new DateTime(s.LastUpdateCheckTicks, DateTimeKind.Utc);
-            if (DateTime.UtcNow - last < TimeSpan.FromHours(24)) return false;
-        }
-        return true;
+        var settings = Settings.Current;
+        long now = DateTime.UtcNow.Ticks;
+        long last = settings.LastUpdateCheckTicks;
+        if (settings.CheckUpdatesEnabled && (last < 0 || last > now || now - last >= TimeSpan.TicksPerHour))
+            _ = CheckAsync(silent: true);
     }
 
+    public static void CheckNow(SynchronizationContext ui) =>
+        ui.Post(state => { _ = CheckAsync(silent: false); }, null);
+
+    // Calls and continuations run on the UI thread. A click during a background request
+    // reuses that request and asks for the result instead of opening a second request.
     private static async Task CheckAsync(bool silent)
     {
-        if (Interlocked.Exchange(ref _busy, 1) == 1) return;   // a check is already in flight
+        if (!silent) _showResult = true;
+        if (_busy) return;
+        _busy = true;
         try
         {
             Feed? feed = null;
@@ -92,7 +98,7 @@ internal static class Updater
             }
             catch
             {
-                if (!silent) MessageBox.Show(
+                if (_showResult) MessageBox.Show(
                     L10n.T("upd.error"), L10n.T("app.name"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -102,7 +108,7 @@ internal static class Updater
                 || latest.Build < 0 || latest.Revision >= 0 || latest.ToString(3) != feed.version
                 || !string.Equals(feed.url, ReleaseUrl + feed.version, StringComparison.Ordinal))
             {
-                if (!silent) MessageBox.Show(L10n.T("upd.error"), L10n.T("app.name"),
+                if (_showResult) MessageBox.Show(L10n.T("upd.error"), L10n.T("app.name"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -110,19 +116,24 @@ internal static class Updater
             Settings.Current.LastUpdateCheckTicks = DateTime.UtcNow.Ticks;
             Settings.Current.Save();
 
-            if (latest > Current)
+            AvailableVersion = latest > Current && Settings.Current.SkippedVersion != feed.version
+                ? feed.version : null;
+            if (_showResult && latest > Current)
             {
-                if (silent && Settings.Current.SkippedVersion == feed.version) return;   // user skipped this one
                 await PromptUpdateAsync(feed);
             }
-            else if (!silent)
+            else if (_showResult)
             {
                 MessageBox.Show(
                     L10n.T("upd.uptodate", Current.ToString(3)),
                     L10n.T("app.name"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
-        finally { Interlocked.Exchange(ref _busy, 0); }
+        finally
+        {
+            _showResult = false;
+            _busy = false;
+        }
     }
 
     private const string UpdateMode = "--install-update";

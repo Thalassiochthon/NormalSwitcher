@@ -333,7 +333,10 @@ internal static class Program
         using var appTracker = new AppLayoutTracker();
         appTracker.Install();
 
-        Updater.CheckOnLaunch(ui);   // silent, throttled once-a-day, off the startup path
+        Updater.CheckOnLaunch(ui);
+        using var updateTimer = new System.Windows.Forms.Timer { Interval = 30 * 60 * 1000 };
+        updateTimer.Tick += (_, _) => Updater.CheckPeriodic();
+        updateTimer.Start();
 
         Log($"NormalSwitcher started — keyboard hook={keyboardHookReady}, trigger={settings.Trigger}");
 

@@ -83,9 +83,9 @@ public sealed class Settings
     public bool PerAppLayout { get; set; } = false;
     public Dictionary<string, long> AppLayouts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Auto-check for updates on launch (once per 24h). Manual check always works.</summary>
+    /// <summary>Check for updates in the background on launch and while running.</summary>
     public bool CheckUpdatesEnabled { get; set; } = false;
-    /// <summary>Last auto-check time (UTC ticks) — throttles to once a day, like the macOS updater.</summary>
+    /// <summary>Last successful update check (UTC ticks) — throttles periodic checks.</summary>
     public long LastUpdateCheckTicks { get; set; } = 0;
     /// <summary>A version the user chose to skip (not re-notified while it's the latest).</summary>
     public string SkippedVersion { get; set; } = "";

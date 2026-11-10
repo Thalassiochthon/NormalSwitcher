@@ -208,6 +208,14 @@ internal sealed class TrayIcon : IDisposable
                 AutoConvertActivated?.Invoke();
                 return IntPtr.Zero;
 
+#if NORMALSWITCHER_UPDATE_SMOKE
+            case WM_APP + 20:
+                if (wParam == IntPtr.Zero)
+                    return Updater.MenuTitle == L10n.T("tray.update") ? IntPtr.Zero : (IntPtr)1;
+                UpdateRequested?.Invoke();
+                return (IntPtr)1;
+#endif
+
             case WM_UPDATE_QUIT:
                 QuitRequested?.Invoke();
                 PostQuitMessage(0);
@@ -238,7 +246,7 @@ internal sealed class TrayIcon : IDisposable
         if (s.ClipboardHistoryEnabled)
             AppendMenuW(menu, MF_STRING, ID_CLIPBOARD, L10n.T("clipboard.title"));
         AppendMenuW(menu, MF_STRING, ID_SETTINGS, L10n.T("tray.settings"));
-        AppendMenuW(menu, MF_STRING, ID_UPDATE, L10n.T("tray.update"));
+        AppendMenuW(menu, MF_STRING, ID_UPDATE, Updater.MenuTitle);
 
         AppendMenuW(menu, MF_SEPARATOR, 0, null);
         AppendMenuW(menu, MF_STRING, ID_QUIT, L10n.T("tray.quit"));

@@ -38,6 +38,9 @@ public static class NormalSwitcherSmoke {
     public static extern IntPtr FindWindow(string className, string windowName);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowW", ExactSpelling = true)]
     public static extern IntPtr FindWindowByTitle(IntPtr className, string windowName);
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")]
+    public static extern IntPtr QueryMenuStatus(IntPtr window, uint message, IntPtr wParam,
+        IntPtr lParam, uint flags, uint timeout, out IntPtr result);
     private delegate bool EnumChildProc(IntPtr window, IntPtr data);
     [DllImport("user32.dll")]
     private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr data);
@@ -100,7 +103,21 @@ try {
         GlobalShortcuts = @{ ChangeCase = @{ Key = 119; Modifiers = 6 } }
     } | ConvertTo-Json -Depth 5 | Set-Content -Encoding ascii $settingsPath
     $running = Start-Process -FilePath $exe -PassThru
-    Wait-ForWindow 'NormalSwitcherTrayWindow' 'NormalSwitcher' | Out-Null
+    $tray = Wait-ForWindow 'NormalSwitcherTrayWindow' 'NormalSwitcher'
+    $updateStatus = [IntPtr]::Zero
+    for ($i = 0; $i -lt 30 -and $updateStatus -eq [IntPtr]::Zero; $i++) {
+        [NormalSwitcherSmoke]::QueryMenuStatus($tray, 0x8014, [IntPtr]::Zero, [IntPtr]::Zero,
+            2, 1000, [ref]$updateStatus) | Out-Null
+        if ($updateStatus -eq [IntPtr]::Zero) { Start-Sleep -Seconds 1 }
+    }
+    if ($updateStatus -eq [IntPtr]::Zero) { throw 'The background check did not update the tray item' }
+    if ([NormalSwitcherSmoke]::FindWindowByTitle([IntPtr]::Zero, 'NormalSwitcher — Update available') -ne [IntPtr]::Zero) {
+        throw 'The background check opened an update window'
+    }
+    if (-not [NormalSwitcherSmoke]::PostMessage($tray, 0x8014, [IntPtr]1, [IntPtr]::Zero)) {
+        throw 'Could not click the tray update item'
+    }
+    Write-Host 'Background check updated the tray item without opening a window.'
     $prompt = Wait-ForWindow $null 'NormalSwitcher — Update available'
     [uint32]$updaterPid = 0
     [NormalSwitcherSmoke]::GetWindowThreadProcessId($prompt, [ref]$updaterPid) | Out-Null
