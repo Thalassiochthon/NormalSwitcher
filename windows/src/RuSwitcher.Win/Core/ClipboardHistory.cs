@@ -7,7 +7,7 @@ namespace RuSwitcher.Win.Core;
 public enum ClipboardShortcut { CtrlShiftV, AltShiftV, CtrlAltV }
 
 /// <summary>Tracks text copied explicitly by the user. All clipboard access runs on the STA UI thread.</summary>
-internal sealed class ClipboardHistory(IntPtr window) : IDisposable
+internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDisposable
 {
     private const int HotkeyId = 1;
     private const int ClearCommand = 100;
@@ -82,8 +82,12 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
         return true;
     }
 
-    private bool Register(KeyChord chord) => _registered = chord.IsValid
-        && RegisterHotKey(window, HotkeyId, chord.Modifiers | MOD_NOREPEAT, chord.Key);
+    private bool Register(KeyChord chord)
+    {
+        _registered = chord.IsValid && RegisterHotKey(window, HotkeyId, chord.Modifiers | MOD_NOREPEAT, chord.Key);
+        if (!_registered) log($"Clipboard hotkey registration failed ({Marshal.GetLastWin32Error()})");
+        return _registered;
+    }
 
     private void Unregister()
     {
@@ -93,7 +97,9 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
 
     public void HandleHotkey(IntPtr id)
     {
-        if ((int)id == HotkeyId) Show();
+        if ((int)id != HotkeyId) return;
+        log("Clipboard hotkey received");
+        Show();
     }
 
     public void SkipCurrent() => _sequence = GetClipboardSequenceNumber();
@@ -136,6 +142,7 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
         Poll();
         var target = InputTarget.Capture();
         if (target is { IsPasswordEdit: true }) return;
+        log($"Clipboard history popup opened (has target: {target != null})");
         var items = _items.ToArray();
         IntPtr menu = CreatePopupMenu();
         if (menu == IntPtr.Zero) return;
@@ -175,7 +182,10 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
             await Task.Delay(75);
         if (!Settings.Current.ClipboardHistoryEnabled
             || InputTarget.Capture() is not { IsPasswordEdit: false } focused || !expected.SameControl(focused))
+        {
+            log("Clipboard paste skipped because focus changed");
             return;
+        }
 
         try
         {

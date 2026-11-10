@@ -34,6 +34,7 @@ internal sealed class TrayIcon : IDisposable
 
     public GlobalShortcuts Shortcuts { get; private set; } = null!;
     public ClipboardHistory ClipboardHistory { get; private set; } = null!;
+    public event Action<string>? Diagnostic;
     public event Action<bool>? EnabledChanged;
     public event Action? SettingsRequested;
     public event Action? UpdateRequested;
@@ -74,7 +75,7 @@ internal sealed class TrayIcon : IDisposable
 
         Shortcuts = new GlobalShortcuts(_hwnd);
         Shortcuts.Initialize();
-        ClipboardHistory = new ClipboardHistory(_hwnd);
+        ClipboardHistory = new ClipboardHistory(_hwnd, message => Diagnostic?.Invoke(message));
         ClipboardHistory.Initialize();
         _tooltip = tooltip;
         _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");

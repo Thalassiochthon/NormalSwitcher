@@ -74,6 +74,8 @@ try {
         Abbreviations = @{ zz = 'NormalSwitcher' }
         ClipboardHistoryEnabled = $true
         ClipboardHistoryPersistent = $true
+        ClipboardCustomShortcut = @{ Key = 120; Modifiers = 6 }
+        DebugLogging = $true
         GlobalShortcuts = @{ ChangeCase = @{ Key = 119; Modifiers = 6 } }
     } | ConvertTo-Json -Depth 5 | Set-Content -Encoding ascii $settingsPath
     $running = Start-Process -FilePath $exe -PassThru
@@ -103,7 +105,11 @@ try {
     $settingsWindow = Wait-ForWindow $null 'NormalSwitcher — Settings'
     [NormalSwitcherSmoke]::PostMessage($settingsWindow, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
     Write-Host 'Update prompt, download, installer handoff, restart, settings preservation and reopening Settings verified.'
-    dotnet run --project windows/tests/NativeInputSmoke/NativeInputSmoke.csproj -c Release
+    try { dotnet run --project windows/tests/NativeInputSmoke/NativeInputSmoke.csproj -c Release }
+    finally {
+        $debugLog = Join-Path $settingsDir 'debug.log'
+        if (Test-Path $debugLog) { Get-Content $debugLog }
+    }
 }
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }

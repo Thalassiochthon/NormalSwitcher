@@ -81,6 +81,7 @@ internal static class Program
         }
 
         using var tray = new TrayIcon();
+        tray.Diagnostic += Log;
         var detector = new TriggerDetector(settings.Trigger);
 
         // Hook thread: only post a message — the real (possibly slow, clipboard-touching)
