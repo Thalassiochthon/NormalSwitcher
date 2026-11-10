@@ -51,6 +51,9 @@ internal static class Program
                 await Until(() => first.Text == prefix + "NormalSwitcher a", "rapid input with verified trailing letter");
 
                 first.Clear();
+                // Clear() changes the fixture programmatically. Send a navigation key so the
+                // app also starts with an empty typing buffer after the previous trailing 'a'.
+                Tap(0x24);
                 TypeShortcutWord();
                 await Until(() => first.Text == "zz", "ordinary keyboard input before Enter");
                 Tap(0x0D);
