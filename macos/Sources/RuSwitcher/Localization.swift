@@ -69,6 +69,10 @@ enum L10n {
     static var settingsAutoDetect: String { s("settings.autoDetect") }
     static var settingsVersion: String { s("settings.version") }
     static var settingsDebugLog: String { s("settings.debugLog") }
+    static var clipboardHistoryAll: String { s("clipboardHistory.all") }
+    static var clipboardHistorySearch: String { s("clipboardHistory.search") }
+    static var clipboardHistoryNoMatches: String { s("clipboardHistory.noMatches") }
+    static var clipboardHistoryPaste: String { s("clipboardHistory.paste") }
     static var clipboardHistoryTitle: String { s("clipboardHistory.title") }
     static var clipboardHistoryEnabled: String { s("clipboardHistory.enabled") }
     static var clipboardHistoryPersistent: String { s("clipboardHistory.persistent") }
@@ -386,6 +390,10 @@ enum L10n {
             "settings.version": "Lightweight alternative to PuntoSwitcher",
             "settings.debugLog": "Debug logging",
             "clipboardHistory.title": "Clipboard History",
+            "clipboardHistory.all": "All History…",
+            "clipboardHistory.search": "Search history",
+            "clipboardHistory.noMatches": "No matches",
+            "clipboardHistory.paste": "Paste",
             "clipboardHistory.enabled": "Enable clipboard history",
             "clipboardHistory.persistent": "Keep history after restarting",
             "clipboardHistory.persistenceHint": "Saves copied text on this Mac. Off by default.",
@@ -586,6 +594,10 @@ enum L10n {
             "settings.version": "Лёгкая альтернатива PuntoSwitcher",
             "settings.debugLog": "Режим отладки",
             "clipboardHistory.title": "История буфера обмена",
+            "clipboardHistory.all": "Вся история…",
+            "clipboardHistory.search": "Поиск по истории",
+            "clipboardHistory.noMatches": "Ничего не найдено",
+            "clipboardHistory.paste": "Вставить",
             "clipboardHistory.enabled": "Включить историю буфера",
             "clipboardHistory.persistent": "Сохранять историю после перезапуска",
             "clipboardHistory.persistenceHint": "Хранит скопированный текст на этом Mac. По умолчанию выключено.",

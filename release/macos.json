@@ -1,10 +1,10 @@
 {
-  "version": "1.1.4",
-  "build": "74",
+  "version": "1.1.5",
+  "build": "75",
   "manual_migration": false,
-  "notes": "Новые версии отмечаются в меню NormalSwitcher. Фоновая проверка больше не открывает окно, а установка по-прежнему начинается после подтверждения.\n\nNew versions appear in the NormalSwitcher menu. Background checks no longer open a window, and installation still requires confirmation.\n",
-  "zip_sha256": "8faa8e78cc27a61ad3ae4dc536242941457dc78bd3ea3963e59dbf30f807dba1",
+  "notes": "В быстром меню буфера обмена теперь восемь последних записей. Пункт «Вся история…» открывает полный список с поиском.\n\nThe clipboard menu now shows the eight most recent entries. All History opens the full, searchable list.\n",
+  "zip_sha256": "ddd33816c84f6e5c427ca5db361fd37b0fca019c4b150aa56b02a777c81f11c2",
   "blobs": [
-    "1187bca4ed93e4442df4646e4ddd0ffa8cb78cc7"
+    "d92e1caa3c4b088438646833991863cab667954c"
   ]
 }

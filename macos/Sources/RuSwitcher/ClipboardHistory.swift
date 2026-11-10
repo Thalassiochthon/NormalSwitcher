@@ -50,6 +50,7 @@ struct ClipboardHistoryShortcut: Codable, Equatable {
 @MainActor
 final class ClipboardHistory {
     static let limit = 30
+    private static let quickLimit = 8
     private static let maxTextBytes = 32 * 1024
     private static let shortcutID = EventHotKeyID(signature: 0x4E534348, id: 1) // NSCH
     private static let ignoredTypes = [
@@ -67,6 +68,7 @@ final class ClipboardHistory {
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private var menuOpen = false
+    private var historyWindow: ClipboardHistoryWindow?
     private struct EntryChoice {
         let text: String
         let target: NSRunningApplication?
@@ -100,6 +102,8 @@ final class ClipboardHistory {
     }
 
     func stop() {
+        historyWindow?.close()
+        historyWindow = nil
         timer?.invalidate()
         timer = nil
         if let hotkey { UnregisterEventHotKey(hotkey) }
@@ -139,6 +143,11 @@ final class ClipboardHistory {
 
     func show(for target: NSRunningApplication?) {
         guard SettingsManager.shared.clipboardHistoryEnabled, !menuOpen, NSApp.modalWindow == nil else { return }
+        if let window = historyWindow?.window, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         capture()
         let menu = NSMenu(title: L10n.clipboardHistoryTitle)
         if entries.isEmpty {
@@ -150,15 +159,17 @@ final class ClipboardHistory {
             }
             menu.addItem(withTitle: message, action: nil, keyEquivalent: "")
         } else {
-            for text in entries {
-                let line = text.prefix(80).split(whereSeparator: \.isWhitespace).joined(separator: " ")
-                let preview = line.isEmpty ? L10n.clipboardHistoryWhitespace : line
-                let item = menu.addItem(withTitle: text.count > 80 ? preview + "…" : preview,
+            for text in entries.prefix(Self.quickLimit) {
+                let item = menu.addItem(withTitle: Self.menuPreview(text),
                                         action: #selector(selectEntry(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = EntryChoice(text: text, target: target)
             }
             menu.addItem(.separator())
+            let all = menu.addItem(withTitle: L10n.clipboardHistoryAll,
+                                   action: #selector(openFullHistory(_:)), keyEquivalent: "")
+            all.target = self
+            all.representedObject = target
             let clearItem = menu.addItem(withTitle: L10n.clipboardHistoryClear,
                                          action: #selector(clearFromMenu), keyEquivalent: "")
             clearItem.target = self
@@ -168,6 +179,39 @@ final class ClipboardHistory {
         menu.popUp(positioning: entries.isEmpty ? nil : menu.items.first,
                    at: NSEvent.mouseLocation, in: nil)
         menuOpen = false
+    }
+
+    private static func menuPreview(_ text: String) -> String {
+        let preview = preview(text, limit: 52)
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.menuFont(ofSize: 0)]
+        guard (preview as NSString).size(withAttributes: attributes).width > 360 else { return preview }
+        var prefix = preview[...]
+        while !prefix.isEmpty, ((String(prefix) + "…") as NSString).size(withAttributes: attributes).width > 360 {
+            prefix = prefix.dropLast()
+        }
+        return String(prefix) + "…"
+    }
+
+    static func preview(_ text: String, limit: Int) -> String {
+        let prefix = text.prefix(limit + 1)
+        let line = prefix.prefix(limit).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !line.isEmpty else { return L10n.clipboardHistoryWhitespace }
+        return prefix.count > limit ? line + "…" : line
+    }
+
+    @objc private func openFullHistory(_ sender: NSMenuItem) {
+        let target = sender.representedObject as? NSRunningApplication
+        DispatchQueue.main.async { [weak self] in
+            guard let self, SettingsManager.shared.clipboardHistoryEnabled else { return }
+            self.capture()
+            let browser = ClipboardHistoryWindow(entries: self.entries) { [weak self] text in
+                target?.activate(options: [])
+                self?.paste(text, into: target)
+            }
+            self.historyWindow = browser
+            browser.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     @objc private func selectEntry(_ sender: NSMenuItem) {
