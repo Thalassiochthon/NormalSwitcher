@@ -12,7 +12,9 @@ function Build-Installer($version, $binary) {
 }
 function Wait-ForWindow($class, $title) {
     for ($i = 0; $i -lt 30; $i++) {
-        $window = [NormalSwitcherSmoke]::FindWindow($class, $title)
+        $window = if ($null -eq $class) {
+            [NormalSwitcherSmoke]::FindWindowByTitle([IntPtr]::Zero, $title)
+        } else { [NormalSwitcherSmoke]::FindWindow($class, $title) }
         if ($window -ne [IntPtr]::Zero) { return $window }
         Start-Sleep -Seconds 1
     }
@@ -33,6 +35,8 @@ using System.Runtime.InteropServices;
 public static class NormalSwitcherSmoke {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr FindWindow(string className, string windowName);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowW", ExactSpelling = true)]
+    public static extern IntPtr FindWindowByTitle(IntPtr className, string windowName);
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 }
@@ -93,6 +97,7 @@ try {
         throw 'Update changed user settings'
     }
 
+    Write-Host 'Update prompt, download, installer handoff, restart and settings preservation verified.'
     $secondLaunch = Start-Process -FilePath $exe -PassThru
     if (-not $secondLaunch.WaitForExit(10000)) { throw 'A second instance did not exit' }
     $settingsWindow = Wait-ForWindow $null 'NormalSwitcher — Settings'
