@@ -1,6 +1,6 @@
 {
-  "version": "0.2.2",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.2",
-  "notes": "Новые настройки Windows с боковой навигацией и фиксированным окном. Интерфейс следует системному масштабу каждого монитора. Обновлён раздел «О программе».\n\nRedesigned Windows settings with sidebar navigation and a fixed-size window that follows each monitor's Windows scaling. The About page has also been refreshed.",
-  "sha256": "840d99d7f84d2d8cdbaf2fd387c798b86e5f39e5978d59de9da8dce1daa265d8"
+  "version": "0.2.3",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.3",
+  "notes": "Исправлена передача символов между Windows и NormalSwitcher при переводе клавиш в текст. Кириллица сохраняется при исправлении раскладки.\n\nFixed Windows keyboard translation to preserve UTF-16 characters, including Cyrillic, during layout correction.",
+  "sha256": "e709d50ce248111ab14a67ff2a375395738e60997c377484d49bf0a37b2e5ed1"
 }
