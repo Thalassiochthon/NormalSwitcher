@@ -7,7 +7,7 @@ $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
 
 function Build-Installer($version, $binary) {
-    & $iscc "/O$root" "/DMyAppVersion=$version" "/DSourceExe=$binary" windows/installer/RuSwitcher.iss | Out-Host
+    & $iscc "/O$root" "/DSmokeBuild=1" "/DMyAppVersion=$version" "/DSourceExe=$binary" windows/installer/RuSwitcher.iss | Out-Host
     return Join-Path $root "NormalSwitcher-Setup-$version.exe"
 }
 function Wait-ForWindow($class, $title) {

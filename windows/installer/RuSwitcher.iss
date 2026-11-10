@@ -37,8 +37,13 @@ OutputDir=dist
 OutputBaseFilename=NormalSwitcher-Setup-{#MyAppVersion}
 SetupIconFile=..\src\RuSwitcher.Win\NormalSwitcher.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+#ifdef SmokeBuild
+Compression=zip
+SolidCompression=no
+#else
 Compression=lzma2
 SolidCompression=yes
+#endif
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

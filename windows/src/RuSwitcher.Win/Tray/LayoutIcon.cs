@@ -43,6 +43,47 @@ internal static class LayoutIcon
                 Fill(Color.White, 0, 3, 16, 10);
                 using (var disc = new SolidBrush(red)) g.FillEllipse(disc, 5, 5, 6, 6);
                 break;
+            case "be":
+                Fill(red, 0, 3, 16, 7);
+                Fill(Color.SeaGreen, 0, 10, 16, 3);
+                Fill(Color.White, 0, 3, 2, 10);
+                for (int y = 3; y < 13; y += 2) Fill(red, y % 4 == 3 ? 0 : 1, y, 1, 1);
+                break;
+            case "pt":
+                Fill(red, 0, 3, 16, 10);
+                Fill(Color.SeaGreen, 0, 3, 6, 10);
+                using (var emblem = new SolidBrush(yellow)) g.FillEllipse(emblem, 4, 6, 5, 5);
+                break;
+            case "zh":
+                Fill(red, 0, 3, 16, 10);
+                Fill(yellow, 2, 5, 3, 1);
+                Fill(yellow, 3, 4, 1, 3);
+                Fill(yellow, 6, 4, 1, 1);
+                Fill(yellow, 7, 6, 1, 1);
+                break;
+            case "ko":
+                Fill(Color.White, 0, 3, 16, 10);
+                using (var top = new SolidBrush(red))
+                using (var bottom = new SolidBrush(blue))
+                {
+                    g.FillPie(top, 5, 5, 6, 6, 180, 180);
+                    g.FillPie(bottom, 5, 5, 6, 6, 0, 180);
+                }
+                Fill(Color.Black, 2, 5, 2, 1);
+                Fill(Color.Black, 12, 5, 2, 1);
+                Fill(Color.Black, 2, 10, 2, 1);
+                Fill(Color.Black, 12, 10, 2, 1);
+                break;
+            case "he":
+                Fill(Color.White, 0, 3, 16, 10);
+                Fill(blue, 0, 4, 16, 1);
+                Fill(blue, 0, 11, 16, 1);
+                using (var star = new Pen(blue))
+                {
+                    g.DrawPolygon(star, [new Point(8, 5), new Point(5, 9), new Point(11, 9)]);
+                    g.DrawPolygon(star, [new Point(8, 10), new Point(5, 6), new Point(11, 6)]);
+                }
+                break;
             case "en" when culture.Name == "en-US":
                 Fill(Color.White, 0, 3, 16, 10);
                 for (int y = 3; y < 13; y += 2) Fill(red, 0, y, 16, 1);

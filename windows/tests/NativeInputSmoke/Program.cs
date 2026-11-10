@@ -41,11 +41,12 @@ internal static class Program
                 Console.WriteLine("Space, Enter and Tab passed.");
                 first.Focus();
                 first.Clear();
+                await Until(() => first.Focused, "fixture focus after Tab");
                 Unicode('z');
                 Unicode('z');
-                await Task.Delay(50);
+                await Until(() => first.Text == "zz", "Unicode packet text before the boundary");
                 Unicode(' ');
-                await Until(() => first.Text == "NormalSwitcher ", "Unicode packet expansion");
+                await Until(() => first.Text == "NormalSwitcher ", $"Unicode packet expansion (received {first.Text.Length} characters initially)");
                 Console.WriteLine("Unicode packet input passed.");
                 first.Clear();
                 Clipboard.SetText("clipboard fixture");
