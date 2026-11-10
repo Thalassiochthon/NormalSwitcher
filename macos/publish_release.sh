@@ -1,4 +1,10 @@
 #!/bin/bash
+# NormalSwitcher publishes through .github/workflows/macos-release.yml.
+# This inherited RuSwitcher pipeline uses upstream assets and destinations.
+echo "This legacy RuSwitcher release script is disabled in NormalSwitcher." >&2
+echo "Use the NormalSwitcher macOS release workflow and release/macos.json." >&2
+exit 2
+
 # Публикация СОБРАННОГО DMG: GitHub-релиз, зеркало на ruswitcher.app, тап, оживление фида.
 # Запускать ПОСЛЕ ./create_dmg.sh [--beta] — он собирает, нотаризует и пишет sha в фид.
 #

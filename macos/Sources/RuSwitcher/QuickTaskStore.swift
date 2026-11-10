@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Darwin
 import Security
 
 struct QuickTask: Codable, Identifiable, Equatable {
@@ -17,7 +18,15 @@ struct QuickTask: Codable, Identifiable, Equatable {
     }
 }
 
-struct QuickTaskStore {
+enum QuickTaskStoreError: Error {
+    case changedOnDisk
+}
+
+final class QuickTaskStore {
+    // Compare the file under an exclusive lock before every write. Two running
+    // copies must not overwrite each other's tasks from an older in-memory list.
+    private var snapshot: Data?
+
     private let file: URL
     private let key: (Bool) throws -> SymmetricKey
 
@@ -34,19 +43,46 @@ struct QuickTaskStore {
         do {
             data = try Data(contentsOf: file)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            snapshot = nil
             return []
         }
         let decoded = try AES.GCM.open(AES.GCM.SealedBox(combined: data), using: key(false))
-        return try JSONDecoder().decode([QuickTask].self, from: decoded)
+        let tasks = try JSONDecoder().decode([QuickTask].self, from: decoded)
+        guard Set(tasks.map(\.id)).count == tasks.count else { throw CocoaError(.coderReadCorrupt) }
+        snapshot = data
+        return tasks
     }
 
     func save(_ tasks: [QuickTask]) throws {
         let directory = file.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        let sealed = try AES.GCM.seal(JSONEncoder().encode(tasks), using: key(true))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        let lock = open(file.appendingPathExtension("lock").path, O_CREAT | O_RDWR, mode_t(0o600))
+        guard lock >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(lock) }
+        guard flock(lock, LOCK_EX) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { flock(lock, LOCK_UN) }
+
+        let current: Data?
+        do {
+            current = try Data(contentsOf: file)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            current = nil
+        }
+        guard current == snapshot else { throw QuickTaskStoreError.changedOnDisk }
+        // A missing key for an existing file is a recoverable access error.
+        // Never silently rotate that key and overwrite the encrypted data.
+        let sealed = try AES.GCM.seal(JSONEncoder().encode(tasks), using: key(current == nil))
         guard let data = sealed.combined else { throw CocoaError(.fileWriteUnknown) }
-        try data.write(to: file, options: .atomic)
+        let temporary = directory.appendingPathComponent(UUID().uuidString + ".tmp")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try data.write(to: temporary, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
+        guard rename(temporary.path, file.path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        snapshot = data
     }
 
     private static func keychainKey(create: Bool) throws -> SymmetricKey {
@@ -63,7 +99,7 @@ struct QuickTaskStore {
             return SymmetricKey(data: bytes)
         }
         guard status == errSecItemNotFound, create else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status == errSecSuccess ? errSecDecode : status))
         }
         let key = SymmetricKey(size: .bits256)
         var attributes = identity

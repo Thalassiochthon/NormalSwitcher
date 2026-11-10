@@ -39,7 +39,7 @@ func taskText(_ english: String, _ russian: String) -> String {
 @MainActor
 final class QuickTasks: ObservableObject {
     private static let signature: OSType = 0x4E53544B // NSTK
-    private let store = QuickTaskStore()
+    private let store: QuickTaskStore
     private var loaded = false
     private var panel: NSPanel?
     private var notice: NSPanel?
@@ -48,9 +48,14 @@ final class QuickTasks: ObservableObject {
     private var hotkeys: [TaskShortcut: EventHotKeyRef] = [:]
     var readClipboard: (() -> String?)?
     @Published private(set) var tasks: [QuickTask] = []
-    @Published var storageError = false
+    @Published private(set) var errorMessage: String?
+
+    init(store: QuickTaskStore = QuickTaskStore()) {
+        self.store = store
+    }
 
     func start() {
+        guard handler == nil else { return }
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
         let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
             guard let event, let context else { return OSStatus(eventNotHandledErr) }
@@ -76,6 +81,9 @@ final class QuickTasks: ObservableObject {
     }
 
     func stop() {
+        dismissNotice?.cancel()
+        notice?.orderOut(nil)
+        panel?.close()
         for hotkey in hotkeys.values { UnregisterEventHotKey(hotkey) }
         hotkeys.removeAll()
         if let handler { RemoveEventHandler(handler) }
@@ -144,9 +152,13 @@ final class QuickTasks: ObservableObject {
             notify(taskText("No available clipboard text", "В буфере нет доступного текста"))
             return
         }
-        if update(task) {
+        if add(task) {
             notify(taskText("Added to tasks", "Добавлено в задачи")) { [weak self] in
-                guard let self, self.delete(task.id) else { return }
+                guard let self else { return }
+                guard self.delete(task.id) else {
+                    self.notify(taskText("Could not undo. Open Tasks to retry.", "Не удалось отменить. Откройте задачи и повторите."))
+                    return
+                }
                 self.notify(taskText("Task removed", "Задача удалена"))
             }
         } else {
@@ -155,23 +167,49 @@ final class QuickTasks: ObservableObject {
     }
 
     @discardableResult
-    func update(_ task: QuickTask) -> Bool {
-        guard loadIfNeeded() else { return false }
+    func add(_ task: QuickTask) -> Bool {
+        guard loadIfNeeded(), !task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !tasks.contains(where: { $0.id == task.id }) else { return false }
+        return save([task] + tasks)
+    }
+
+    @discardableResult
+    func edit(_ draft: QuickTask) -> Bool {
+        guard loadIfNeeded(), let index = existingIndex(draft.id) else { return false }
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return false }
         var updated = tasks
-        if let index = updated.firstIndex(where: { $0.id == task.id }) {
-            updated[index] = task
-        } else {
-            updated.insert(task, at: 0)
-        }
+        updated[index].title = title
+        updated[index].text = draft.text
         return save(updated)
+    }
+
+    @discardableResult
+    func setCompleted(_ id: UUID, to completed: Bool) -> Bool {
+        guard loadIfNeeded(), let index = existingIndex(id) else { return false }
+        var updated = tasks
+        updated[index].completed = completed
+        return save(updated)
+    }
+
+    private func existingIndex(_ id: UUID) -> Int? {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else {
+            errorMessage = taskText("This task has been removed. Copy your text before closing.",
+                                    "Эта задача удалена. Скопируйте текст перед закрытием.")
+            return nil
+        }
+        return index
     }
 
     @discardableResult
     func delete(_ id: UUID) -> Bool {
         guard loadIfNeeded() else { return false }
-        if save(tasks.filter { $0.id != id }) { return true }
-        notify(taskText("Could not remove the task", "Не удалось удалить задачу"))
-        return false
+        return save(tasks.filter { $0.id != id })
+    }
+
+    func reload() {
+        loaded = false
+        _ = loadIfNeeded()
     }
 
     private func loadIfNeeded() -> Bool {
@@ -179,10 +217,11 @@ final class QuickTasks: ObservableObject {
         do {
             tasks = try store.load()
             loaded = true
-            storageError = false
+            errorMessage = nil
             return true
         } catch {
-            storageError = true
+            errorMessage = taskText("Could not read or save tasks. Check storage and Keychain access, then retry.",
+                                    "Не удалось прочитать или сохранить задачи. Проверьте доступ к хранилищу и Связке ключей, затем повторите.")
             return false
         }
     }
@@ -191,10 +230,15 @@ final class QuickTasks: ObservableObject {
         do {
             try store.save(updated)
             tasks = updated
-            storageError = false
+            errorMessage = nil
             return true
+        } catch QuickTaskStoreError.changedOnDisk {
+            errorMessage = taskText("Tasks changed in another copy of the app. Reload before saving.",
+                                    "Задачи изменились в другой копии программы. Обновите список перед сохранением.")
+            return false
         } catch {
-            storageError = true
+            errorMessage = taskText("Could not read or save tasks. Check storage and Keychain access, then retry.",
+                                    "Не удалось прочитать или сохранить задачи. Проверьте доступ к хранилищу и Связке ключей, затем повторите.")
             return false
         }
     }

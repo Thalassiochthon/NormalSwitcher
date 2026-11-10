@@ -530,7 +530,7 @@ final class SettingsManager: @unchecked Sendable {
 
     // MARK: - GitHub coordinates (единственный источник — чтобы при переименовании
     // репозитория правка была в одном месте)
-    static let githubOwner = "antonjas"
+    static let githubOwner = "Thalassiochthon"
     static let githubRepo = "NormalSwitcher"
     static var githubURL: String { "https://github.com/\(githubOwner)/\(githubRepo)" }
     static var releasesURL: URL? { URL(string: "\(githubURL)/releases") }

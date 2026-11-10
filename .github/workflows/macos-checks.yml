@@ -1,0 +1,22 @@
+name: Check macOS
+on:
+  pull_request:
+    branches: [personal]
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos-checks.yml'
+  push:
+    branches: [personal, macos/clipboard-tasks-mvp]
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos-checks.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run regression tests
+        run: swift test --package-path macos
