@@ -151,7 +151,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = '${{ steps.ver.outputs.version }}'
-          $notes = "NormalSwitcher for Windows $v`n`nAssets: portable single-file exe (x64/arm64) and an installer.`n`nSHA256:`n" + (Get-Content assets\SHA256SUMS.txt -Raw)
+          $changes = "NormalSwitcher for Windows $v"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tagMessage = (git for-each-ref --format='%(contents)' "refs/tags/win-v$v") -join "`n"
+            if ((git cat-file -t "refs/tags/win-v$v") -eq 'tag' -and $tagMessage.Trim()) {
+              $changes = $tagMessage.Trim()
+            }
+          }
+          $changes | Out-File -Encoding utf8 "$env:RUNNER_TEMP/windows-update-notes.txt"
+          $notes = $changes + "`n`nAssets: portable single-file exe (x64/arm64) and an installer.`n`nSHA256:`n" + (Get-Content assets/SHA256SUMS.txt -Raw)
           $notes | Out-File -Encoding utf8 notes.md
           # Build the arg list explicitly: an empty '$pre' would otherwise reach gh as an empty
           # positional (a bogus asset path) and fail the first stable release. --target pins the tag to
@@ -161,3 +169,45 @@ jobs:
                       '--target', '${{ github.sha }}')
           if ('${{ steps.ver.outputs.prerelease }}' -eq 'true') { $ghArgs += '--prerelease' }
           gh release create @ghArgs
+
+
+      - name: Announce the verified installer to installed copies
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.ver.outputs.version }}'
+          $repo = "repos/$env:GITHUB_REPOSITORY"
+          $release = gh api "$repo/releases/tags/win-v$version" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release -or $release.draft) { throw 'Windows release is unavailable' }
+          $name = "NormalSwitcher-Setup-$version.exe"
+          $asset = $release.assets | Where-Object { $_.name -eq $name -and $_.state -eq 'uploaded' }
+          $hash = (Get-FileHash "assets/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($asset.digest -cne "sha256:$hash") { throw 'Published installer checksum does not match the build' }
+
+          $feed = [ordered]@{
+            version = $version
+            url = $release.html_url
+            notes = (Get-Content "$env:RUNNER_TEMP/windows-update-notes.txt" -Raw).Trim()
+            sha256 = $hash
+          } | ConvertTo-Json
+          $endpoint = "$repo/contents/windows/version.json"
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $current = gh api "${endpoint}?ref=windows-preview" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or -not $current.sha) { throw 'Could not read Windows update channel' }
+            $previous = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($current.content)) | ConvertFrom-Json
+            if ([version]$previous.version -ge [version]$version) { exit 0 }
+
+            $body = @{
+              branch = 'windows-preview'
+              sha = $current.sha
+              message = "Announce NormalSwitcher $version to Windows users"
+              content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$feed`n"))
+            } | ConvertTo-Json
+            $inputFile = "$env:RUNNER_TEMP/windows-update-feed.json"
+            $body | Set-Content -Encoding utf8NoBOM $inputFile
+            gh api --method PUT "$endpoint" --input "$inputFile" --silent
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Start-Sleep -Seconds 2
+          }
+          throw 'Could not publish the Windows update channel'
