@@ -9,6 +9,7 @@ namespace RuSwitcher.Win.Tray;
 /// </summary>
 internal sealed class TrayIcon : IDisposable
 {
+    internal const string WindowClass = "NormalSwitcherTrayWindow";
     private const uint ID_ENABLE = 1;
     private const uint ID_QUIT = 2;
     private const uint ID_SETTINGS = 14;
@@ -22,12 +23,16 @@ internal sealed class TrayIcon : IDisposable
     private NOTIFYICONDATA _nid;
     private readonly System.Windows.Forms.Timer _layoutTimer = new() { Interval = 250 };
     private Icon? _icon;
+    private CaretBadge? _badge;
+    private bool _visible;
+    private bool _monochrome;
     private IntPtr _shownLayout;
     private bool _menuOpen;
     private string _tooltip = "";
     private uint _taskbarCreated;
-    private bool _enabled = true;
+    private bool _enabled = Settings.Current.KeyboardEnabled;
 
+    public GlobalShortcuts Shortcuts { get; private set; } = null!;
     public ClipboardHistory ClipboardHistory { get; private set; } = null!;
     public event Action<bool>? EnabledChanged;
     public event Action? SettingsRequested;
@@ -62,19 +67,22 @@ internal sealed class TrayIcon : IDisposable
         {
             lpfnWndProc = _wndProc,
             hInstance = hInstance,
-            lpszClassName = "NormalSwitcherTrayWindow",
+            lpszClassName = WindowClass,
         };
         RegisterClassW(ref wc);
 
-        _hwnd = CreateWindowExW(0, "NormalSwitcherTrayWindow", "NormalSwitcher",
+        _hwnd = CreateWindowExW(0, WindowClass, "NormalSwitcher",
             0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
+        Shortcuts = new GlobalShortcuts(_hwnd);
+        Shortcuts.Initialize();
         ClipboardHistory = new ClipboardHistory(_hwnd);
         ClipboardHistory.Initialize();
         _tooltip = tooltip;
         _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
         _shownLayout = LayoutSwitcher.Current();
-        _icon = LayoutIcon.Create(_shownLayout);
+        _monochrome = Settings.Current.MonochromeTray;
+        _icon = LayoutIcon.Create(_shownLayout, _monochrome);
         _nid = new NOTIFYICONDATA
         {
             cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<NOTIFYICONDATA>(),
@@ -85,11 +93,12 @@ internal sealed class TrayIcon : IDisposable
             hIcon = _icon.Handle,
             szTip = LayoutTooltip(_shownLayout),
         };
-        Shell_NotifyIconW(NIM_ADD, ref _nid);
+        RefreshAppearance();
         _layoutTimer.Tick += (_, _) =>
         {
             RefreshLayout();
             ClipboardHistory.Poll();
+            Shortcuts.Poll();
         };
         _layoutTimer.Start();
     }
@@ -100,17 +109,37 @@ internal sealed class TrayIcon : IDisposable
         return text.Length <= 127 ? text : text[..127];
     }
 
+    public void PostShortcutPoll() => PostMessageW(_hwnd, WM_SHORTCUTREADY, IntPtr.Zero, IntPtr.Zero);
+
+    public void RefreshAppearance()
+    {
+        bool show = !Settings.Current.HideTrayIcon;
+        if (show != _visible)
+        {
+            if (show) _visible = Shell_NotifyIconW(NIM_ADD, ref _nid);
+            else { Shell_NotifyIconW(NIM_DELETE, ref _nid); _visible = false; }
+        }
+        if (!Settings.Current.CaretIndicator)
+        {
+            _badge?.Dispose();
+            _badge = null;
+        }
+        RefreshLayout();
+    }
+
     private void RefreshLayout()
     {
         if (_menuOpen) return;
         IntPtr layout = LayoutSwitcher.Current();
-        if (layout == _shownLayout) return;
+        bool changed = layout != _shownLayout;
+        bool monochrome = Settings.Current.MonochromeTray;
+        if (!changed && monochrome == _monochrome) return;
 
-        var next = LayoutIcon.Create(layout);
+        var next = LayoutIcon.Create(layout, monochrome);
         var data = _nid;
         data.hIcon = next.Handle;
         data.szTip = LayoutTooltip(layout);
-        if (!Shell_NotifyIconW(NIM_MODIFY, ref data))
+        if (_visible && !Shell_NotifyIconW(NIM_MODIFY, ref data))
         {
             next.Dispose();
             return;
@@ -119,6 +148,9 @@ internal sealed class TrayIcon : IDisposable
         _icon = next;
         _nid = data;
         _shownLayout = layout;
+        _monochrome = monochrome;
+        if (changed && Settings.Current.CaretIndicator)
+            (_badge ??= new CaretBadge()).ShowAtCaret(layout);
     }
 
     internal static string TriggerName(TriggerKind t) => t switch
@@ -133,7 +165,8 @@ internal sealed class TrayIcon : IDisposable
     {
         if (msg == _taskbarCreated && msg != 0)
         {
-            Shell_NotifyIconW(NIM_ADD, ref _nid);
+            _visible = false;
+            RefreshAppearance();
             return IntPtr.Zero;
         }
         switch (msg)
@@ -143,7 +176,19 @@ internal sealed class TrayIcon : IDisposable
                 return IntPtr.Zero;
 
             case WM_HOTKEY:
-                if (!_menuOpen) ClipboardHistory.HandleHotkey(wParam);
+                if (!_menuOpen)
+                {
+                    ClipboardHistory.HandleHotkey(wParam);
+                    Shortcuts.Handle(wParam);
+                }
+                return IntPtr.Zero;
+
+            case WM_SETTINGS:
+                SettingsRequested?.Invoke();
+                return IntPtr.Zero;
+
+            case WM_SHORTCUTREADY:
+                Shortcuts.Poll();
                 return IntPtr.Zero;
 
             case WM_APP:
@@ -201,7 +246,7 @@ internal sealed class TrayIcon : IDisposable
 
         switch (command)
         {
-            case ID_ENABLE: _enabled = !_enabled; EnabledChanged?.Invoke(_enabled); break;
+            case ID_ENABLE: SetEnabled(!_enabled); break;
             case ID_CLIPBOARD:
                 if (target != IntPtr.Zero) SetForegroundWindow(target);
                 ClipboardHistory.Show();
@@ -220,12 +265,22 @@ internal sealed class TrayIcon : IDisposable
         }
     }
 
+    public void SetEnabled(bool enabled)
+    {
+        _enabled = enabled;
+        Settings.Current.KeyboardEnabled = enabled;
+        Settings.Current.Save();
+        EnabledChanged?.Invoke(enabled);
+    }
+
     private static uint Chk(bool on) => on ? MF_CHECKED : MF_UNCHECKED;
 
     public void Dispose()
     {
         _layoutTimer.Dispose();
+        _badge?.Dispose();
         ClipboardHistory?.Dispose();
+        Shortcuts?.Dispose();
         if (_hwnd != IntPtr.Zero)
         {
             Shell_NotifyIconW(NIM_DELETE, ref _nid);

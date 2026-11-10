@@ -11,8 +11,10 @@ internal sealed class SettingsForm : Form
 {
     public event Action<TriggerKind>? TriggerChanged;
     public event Action? SwitchChanged;
+    public event Action? AppearanceChanged;
+    public event Action<bool>? KeyboardEnabledChanged;
 
-    public SettingsForm(ClipboardHistory history)
+    public SettingsForm(ClipboardHistory history, GlobalShortcuts globalShortcuts, string logPath)
     {
         var s = Settings.Current;
         Text = L10n.T("settings.title");
@@ -27,6 +29,7 @@ internal sealed class SettingsForm : Form
         IntPtr[] layouts = [IntPtr.Zero, .. LayoutSwitcher.Installed()];
         string[] layoutNames = [L10n.T("settings.layout.auto"), .. layouts.Skip(1).Select(LayoutIcon.Name)];
         AddPage("general",
+            Check("tray.enable", s.KeyboardEnabled, value => KeyboardEnabledChanged?.Invoke(value)),
             Check("settings.startup", AutoStart.IsEnabled(), AutoStart.SetEnabled),
             Check("settings.sound", s.SoundOnSwitch, value => { s.SoundOnSwitch = value; s.Save(); }),
             Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }),
@@ -43,8 +46,10 @@ internal sealed class SettingsForm : Form
                 }));
 
         var triggers = Enum.GetValues<TriggerKind>().Select(TrayIcon.TriggerName).ToArray();
+        var configurable = Enum.GetValues<ShortcutAction>().Select(action =>
+            ShortcutButton("hotkeys." + action, () => globalShortcuts.Get(action), chord => globalShortcuts.Set(action, chord)));
         AddPage("hotkeys",
-            Choice("settings.trigger", triggers, (int)s.Trigger, index =>
+            [Choice("settings.trigger", triggers, (int)s.Trigger, index =>
             {
                 s.Trigger = (TriggerKind)index;
                 s.Save();
@@ -57,7 +62,8 @@ internal sealed class SettingsForm : Form
                     if (index > 0) s.SwitchTrigger = (TriggerKind)(index - 1);
                     s.Save();
                     SwitchChanged?.Invoke();
-                }));
+                }),
+            .. configurable]);
 
         var exceptions = new Button { Text = L10n.T("settings.exceptions"), AutoSize = true };
         exceptions.Click += (_, _) => { using var form = new ExceptionsForm(); form.ShowDialog(this); };
@@ -84,9 +90,7 @@ internal sealed class SettingsForm : Form
                 ShowClipboardError("clipboard.storageError");
             }
         };
-        var shortcuts = new[] { "Ctrl + Shift + V", "Alt + Shift + V", "Ctrl + Alt + V" };
-        var shortcut = Choice("clipboard.shortcut", shortcuts, (int)s.ClipboardHistoryShortcut,
-            index => history.SetShortcut((ClipboardShortcut)index), () => ShowClipboardError("clipboard.hotkeyError"));
+        var shortcut = ShortcutButton("clipboard.shortcut", () => history.DisplayShortcut, history.SetCustomShortcut);
         var enabled = new CheckBox { Text = L10n.T("clipboard.enable"), AutoSize = true, Checked = s.ClipboardHistoryEnabled };
         enabled.Click += (_, _) =>
         {
@@ -100,10 +104,25 @@ internal sealed class SettingsForm : Form
         AddPage("clipboard", enabled, shortcut, persist,
             new Label { Text = L10n.T("clipboard.hint"), MaximumSize = new Size(440, 0), AutoSize = true });
 
+        var openLog = new Button { Text = L10n.T("settings.log.open"), AutoSize = true };
+        openLog.Click += (_, _) =>
+        {
+            if (File.Exists(logPath))
+            {
+                try { using var process = Process.Start(new ProcessStartInfo(logPath) { UseShellExecute = true }); }
+                catch { }
+            }
+            else MessageBox.Show(this, L10n.T("settings.log.empty"), Text);
+        };
         AddPage("advanced",
+            Check("settings.tray.hide", s.HideTrayIcon, value => SetAppearance(() => s.HideTrayIcon = value)),
+            Check("settings.tray.mono", s.MonochromeTray, value => SetAppearance(() => s.MonochromeTray = value)),
+            Check("settings.tray.caret", s.CaretIndicator, value => SetAppearance(() => s.CaretIndicator = value)),
             Check("settings.wholeline", s.ConvertWholeLine, value => { s.ConvertWholeLine = value; s.Save(); }),
             Check("settings.smart", s.SmartConversion, value => { s.SmartConversion = value; s.Save(); }),
-            Check("settings.updates", s.CheckUpdatesEnabled, value => { s.CheckUpdatesEnabled = value; s.Save(); }));
+            Check("settings.updates", s.CheckUpdatesEnabled, value => { s.CheckUpdatesEnabled = value; s.Save(); }),
+            Check("settings.log.enable", s.DebugLogging, value => { s.DebugLogging = value; s.Save(); }),
+            openLog);
 
         AddPage("about",
             new Label { Text = $"NormalSwitcher {Updater.Current.ToString(3)}", AutoSize = true },
@@ -121,6 +140,13 @@ internal sealed class SettingsForm : Form
         CancelButton = close;
         Controls.Add(tabs);
         Controls.Add(footer);
+
+        void SetAppearance(Action change)
+        {
+            change();
+            s.Save();
+            AppearanceChanged?.Invoke();
+        }
 
         void ShowClipboardError(string key) =>
             MessageBox.Show(this, L10n.T(key), L10n.T("settings.title"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -143,6 +169,24 @@ internal sealed class SettingsForm : Form
         }
     }
 
+    private Control ShortcutButton(string key, Func<KeyChord?> current, Func<KeyChord?, bool> save)
+    {
+        var button = new Button { Text = current()?.ToString() ?? L10n.T("settings.off"), AutoSize = true };
+        button.Click += (_, _) =>
+        {
+            using var recorder = new ShortcutRecorder();
+            if (recorder.ShowDialog(this) != DialogResult.OK) return;
+            if (save(recorder.Chord))
+                button.Text = current()?.ToString() ?? L10n.T("settings.off");
+            else
+                MessageBox.Show(this, L10n.T("clipboard.hotkeyError"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        };
+        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        var title = new Label { Text = L10n.T(key), AutoSize = true, Margin = new Padding(0, 6, 8, 0) };
+        row.Controls.AddRange([title, button]);
+        return row;
+    }
+
     private static CheckBox Check(string key, bool value, Action<bool> onChange)
     {
         var check = new CheckBox { Text = L10n.T(key), AutoSize = true, Checked = value };
@@ -150,25 +194,14 @@ internal sealed class SettingsForm : Form
         return check;
     }
 
-    private static Control Choice(string key, string[] options, int selected, Action<int> onChange) =>
-        Choice(key, options, selected, index => { onChange(index); return true; }, () => { });
-
-    private static Control Choice(string key, string[] options, int selected, Func<int, bool> onChange, Action onFailure)
+    private static Control Choice(string key, string[] options, int selected, Action<int> onChange)
     {
         var row = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, RowCount = 1 };
         var label = new Label { Text = L10n.T(key), AutoSize = true, Anchor = AnchorStyles.Left };
         var combo = new ComboBox { Width = 210, DropDownStyle = ComboBoxStyle.DropDownList };
         combo.Items.AddRange(options);
         combo.SelectedIndex = Math.Clamp(selected, 0, options.Length - 1);
-        combo.SelectionChangeCommitted += (_, _) =>
-        {
-            if (onChange(combo.SelectedIndex)) selected = combo.SelectedIndex;
-            else
-            {
-                combo.SelectedIndex = selected;
-                onFailure();
-            }
-        };
+        combo.SelectionChangeCommitted += (_, _) => onChange(combo.SelectedIndex);
         row.Controls.Add(label, 0, 0);
         row.Controls.Add(combo, 1, 0);
         return row;

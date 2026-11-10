@@ -6,20 +6,21 @@ New-Item -ItemType Directory -Force $root | Out-Null
 $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
 
-function Run-Installer($file, [bool] $update) {
-    $arguments = @('/VERYSILENT', '/SP-', '/NORESTART', '/NORESTARTAPPLICATIONS', "/DIR=`"$destination`"")
-    if ($update) { $arguments += '/NORMALSWITCHERUPDATE=1' }
-    $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
-    if (-not $process.WaitForExit(60000)) { throw 'Installer did not finish' }
-    if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
-}
 function Build-Installer($version, $binary) {
     & $iscc "/O$root" "/DMyAppVersion=$version" "/DSourceExe=$binary" windows/installer/RuSwitcher.iss | Out-Host
     return Join-Path $root "NormalSwitcher-Setup-$version.exe"
 }
+function Wait-ForWindow($class, $title) {
+    for ($i = 0; $i -lt 30; $i++) {
+        $window = [NormalSwitcherSmoke]::FindWindow($class, $title)
+        if ($window -ne [IntPtr]::Zero) { return $window }
+        Start-Sleep -Seconds 1
+    }
+    throw "Window did not appear: $title"
+}
 
 $previous = Join-Path $root 'previous'
-dotnet publish windows/src/RuSwitcher.Win/RuSwitcher.Win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=0.0.1 -o $previous --nologo
+dotnet publish windows/src/RuSwitcher.Win/RuSwitcher.Win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=0.0.1 -p:DefineConstants=NORMALSWITCHER_UPDATE_SMOKE -o $previous --nologo
 $first = Build-Installer '0.0.1' (Join-Path $previous 'NormalSwitcher.exe')
 $next = Build-Installer '0.1.0' (Resolve-Path 'publish/NormalSwitcher.exe').Path
 $settingsDir = Join-Path $env:LOCALAPPDATA 'NormalSwitcher'
@@ -37,43 +38,58 @@ public static class NormalSwitcherSmoke {
 }
 '@
 
-function Wait-ForTray {
-    for ($i = 0; $i -lt 30; $i++) {
-        $window = [NormalSwitcherSmoke]::FindWindow('NormalSwitcherTrayWindow', 'NormalSwitcher')
-        if ($window -ne [IntPtr]::Zero) { return $window }
-        Start-Sleep -Seconds 1
-    }
-    throw 'NormalSwitcher did not create its tray window'
-}
-
+$server = $null
 try {
-    Run-Installer $first $false
+    $installer = Start-Process $first -ArgumentList @('/VERYSILENT', '/SP-', '/NORESTART', "/DIR=`"$destination`"") -PassThru
+    if (-not $installer.WaitForExit(60000) -or $installer.ExitCode -ne 0) { throw 'First installation failed' }
     if ((Get-Item $exe).VersionInfo.FileVersion -ne '0.0.1.0') { throw 'Initial version mismatch' }
     $uninstall = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D729A5A6-DE1C-5068-A3B9-97BED831D11B}_is1'
     if ($uninstall.InstallLocation.TrimEnd('\') -ne $destination) { throw 'Updater cannot find the registered install directory' }
 
-    New-Item -ItemType Directory -Force $settingsDir | Out-Null
-    '{"ConvertWholeLine":true,"CheckUpdatesEnabled":false}' | Set-Content -Encoding ascii $settingsPath
-    $original = Get-FileHash $settingsPath
-    $running = Start-Process -FilePath $exe -PassThru
-    $window = Wait-ForTray
-    if (-not [NormalSwitcherSmoke]::PostMessage($window, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) {
-        throw 'Could not close the installed app'
+    $web = New-Item -ItemType Directory -Force (Join-Path $root 'web')
+    $download = New-Item -ItemType Directory -Force (Join-Path $web.FullName 'download/win-v0.1.0')
+    Copy-Item $next $download.FullName
+    @{
+        version = '0.1.0'
+        url = 'http://127.0.0.1:18443/tag/win-v0.1.0'
+        sha256 = (Get-FileHash $next -Algorithm SHA256).Hash
+    } | ConvertTo-Json | Set-Content -Encoding ascii (Join-Path $web.FullName 'version.json')
+    $server = Start-Process python -WorkingDirectory $web.FullName -ArgumentList @('-m', 'http.server', '18443', '--bind', '127.0.0.1') -PassThru
+    for ($i = 0; $i -lt 20; $i++) {
+        try { Invoke-WebRequest 'http://127.0.0.1:18443/version.json' -TimeoutSec 2 | Out-Null; break }
+        catch { if ($i -eq 19) { throw }; Start-Sleep -Seconds 1 }
     }
-    if (-not $running.WaitForExit(10000)) { throw 'The app did not exit before upgrade' }
 
-    Run-Installer $next $true
-    if ((Get-Item $exe).VersionInfo.FileVersion -ne '0.1.0.0') { throw 'Updated version mismatch' }
-    if ((Get-FileHash $settingsPath).Hash -ne $original.Hash) { throw 'Update changed user settings' }
+    New-Item -ItemType Directory -Force $settingsDir | Out-Null
+    '{"ConvertWholeLine":true,"CheckUpdatesEnabled":true,"UiLanguage":"en"}' | Set-Content -Encoding ascii $settingsPath
+    $running = Start-Process -FilePath $exe -PassThru
+    Wait-ForWindow 'NormalSwitcherTrayWindow' 'NormalSwitcher' | Out-Null
+    $prompt = Wait-ForWindow '#32770' 'NormalSwitcher — Update available'
+    if (-not [NormalSwitcherSmoke]::PostMessage($prompt, 0x0111, [IntPtr]6, [IntPtr]::Zero)) {
+        throw 'Could not confirm the update'
+    }
+    if (-not $running.WaitForExit(60000)) { throw 'The updater did not hand off to the installer' }
+
     $restarted = $null
-    for ($i = 0; $i -lt 30 -and -not $restarted; $i++) {
+    for ($i = 0; $i -lt 60 -and -not $restarted; $i++) {
         $restarted = Get-Process NormalSwitcher -ErrorAction SilentlyContinue | Where-Object Path -eq $exe
         if (-not $restarted) { Start-Sleep -Seconds 1 }
     }
     if (-not $restarted) { throw 'NormalSwitcher did not restart after the update' }
-    Wait-ForTray | Out-Null
-    Write-Host 'Installer upgrade, launch of the new version, and settings preservation verified.'
+    Wait-ForWindow 'NormalSwitcherTrayWindow' 'NormalSwitcher' | Out-Null
+    if ((Get-Item $exe).VersionInfo.FileVersion -ne '0.1.0.0') { throw 'Updated version mismatch' }
+    $saved = Get-Content -Raw $settingsPath | ConvertFrom-Json
+    if (-not $saved.ConvertWholeLine -or -not $saved.CheckUpdatesEnabled -or $saved.UiLanguage -ne 'en') {
+        throw 'Update changed user settings'
+    }
+
+    $secondLaunch = Start-Process -FilePath $exe -PassThru
+    if (-not $secondLaunch.WaitForExit(10000)) { throw 'A second instance did not exit' }
+    $settingsWindow = Wait-ForWindow $null 'NormalSwitcher — Settings'
+    [NormalSwitcherSmoke]::PostMessage($settingsWindow, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    Write-Host 'Update prompt, download, installer handoff, restart, settings preservation and reopening Settings verified.'
 }
 finally {
+    if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     Get-Process NormalSwitcher -ErrorAction SilentlyContinue | Where-Object Path -eq $exe | Stop-Process -Force
 }

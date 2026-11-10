@@ -16,7 +16,12 @@ internal static class Program
     private static void Main()
     {
         using var instance = new Mutex(true, @"Local\NormalSwitcher.Windows", out bool firstInstance);
-        if (!firstInstance) return;
+        if (!firstInstance)
+        {
+            IntPtr window = FindWindowW(TrayIcon.WindowClass, "NormalSwitcher");
+            if (window != IntPtr.Zero) PostMessageW(window, WM_SETTINGS, IntPtr.Zero, IntPtr.Zero);
+            return;
+        }
 
         ApplicationConfiguration.Initialize();
 
@@ -24,7 +29,11 @@ internal static class Program
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NormalSwitcher");
         Directory.CreateDirectory(logDir);
         string logPath = Path.Combine(logDir, "debug.log");
-        void Log(string line) => File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+        void Log(string line)
+        {
+            if (Settings.Current.DebugLogging)
+                File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+        }
 
         // Capture crashes to the log instead of dying silently (a tester can then send debug.log).
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
@@ -34,7 +43,7 @@ internal static class Program
 
         var settings = Settings.Current;
         var buffer = new KeystrokeBuffer();
-        bool enabled = true;
+        bool enabled = settings.KeyboardEnabled;
         long inputGeneration = 0;
         InputTarget? wordTarget = null, undoTarget = null;
         (List<TypedKey> Keys, InputTarget Target, long Generation)? pendingAuto = null;
@@ -75,14 +84,15 @@ internal static class Program
 
         // Hook thread: only post a message — the real (possibly slow, clipboard-touching)
         // conversion runs on the message loop so the LL hook callback stays fast.
-        detector.Triggered += () =>
+        detector.Triggered += QueueManualCorrection;
+        void QueueManualCorrection()
         {
             if (enabled && InputTarget.Capture() is { } target)
             {
                 pendingTrigger = (target, inputGeneration);
                 tray.PostTrigger();
             }
-        };
+        }
 
         // issue #14: a separate hotkey that only switches the layout (fast → safe in-callback).
         var switchDetector = new TriggerDetector(settings.SwitchTrigger);
@@ -129,16 +139,57 @@ internal static class Program
                 undoTarget = word.Target;
         };
         tray.EnabledChanged += on => { enabled = on; ResetInput(); Log($"enabled = {on}"); };
+        UI.SettingsForm? currentSettings = null;
         tray.SettingsRequested += () =>
         {
-            using var form = new UI.SettingsForm(tray.ClipboardHistory);
+            if (currentSettings != null) { currentSettings.Activate(); return; }
+            using var form = new UI.SettingsForm(tray.ClipboardHistory, tray.Shortcuts, logPath);
+            currentSettings = form;
+            form.AppearanceChanged += tray.RefreshAppearance;
+            form.KeyboardEnabledChanged += tray.SetEnabled;
             form.TriggerChanged += kind => detector.Kind = kind;
             form.SwitchChanged += () => switchDetector.Kind = settings.SwitchTrigger;
-            form.ShowDialog();   // modal; the message loop keeps pumping the hook + tray
+            try { form.ShowDialog(); } // modal; the message loop keeps pumping the hook + tray
+            finally { currentSettings = null; }
         };
         tray.QuitRequested += () => Log("quit requested");
         tray.Show("NormalSwitcher");
         tray.ClipboardHistory.Pasted += ResetInput;
+        tray.Shortcuts.Activated += action =>
+        {
+            if (!enabled || InputTarget.Capture() is not { IsPasswordEdit: false } target) return;
+            switch (action)
+            {
+                case ShortcutAction.Correct:
+                    QueueManualCorrection();
+                    break;
+                case ShortcutAction.Switch:
+                    if (LayoutSwitcher.Opposite() is { } opposite) LayoutSwitcher.SwitchTo(opposite);
+                    ResetInput();
+                    break;
+                case ShortcutAction.FirstLayout:
+                case ShortcutAction.SecondLayout:
+                    IntPtr layout = LayoutSwitcher.Preferred(action == ShortcutAction.FirstLayout);
+                    if (layout != IntPtr.Zero) LayoutSwitcher.SwitchTo(layout);
+                    ResetInput();
+                    break;
+                case ShortcutAction.ChangeCase:
+                    tray.ClipboardHistory.Poll();
+                    Converter.ChangeSelectionCase();
+                    tray.ClipboardHistory.SkipCurrent();
+                    ResetInput();
+                    break;
+                case ShortcutAction.AddException:
+                    if (wordTarget != target || buffer.IsEmpty) break;
+                    string word = KeyMapper.ConvertWord(buffer.CurrentWord, target.Layout).ToLowerInvariant();
+                    if (word.Length > 1 && !settings.NeverConvert.Contains(word))
+                    {
+                        settings.NeverConvert.Add(word);
+                        settings.Save();
+                    }
+                    break;
+            }
+        };
 
         // A hidden WinForms control forces a WindowsFormsSynchronizationContext onto this thread, so
         // the background update check can marshal its message box back here (dispatched by our loop).
@@ -148,7 +199,7 @@ internal static class Program
         tray.UpdateRequested += () => Updater.CheckNow(ui);
 
         using var hook = new KeyboardHook();
-        hook.MousePressed += ResetInput;
+        hook.MousePressed += () => { tray.Shortcuts.CancelPending(); ResetInput(); };
         hook.KeyDown += (vk, sc) =>
         {
             if (!enabled) return;
@@ -157,9 +208,11 @@ internal static class Program
 
             detector.OnKeyDown(vk);
             switchDetector.OnKeyDown(vk);
-            if (vk is VK_LCONTROL or VK_RCONTROL or VK_LSHIFT or VK_RSHIFT or VK_PAUSE)
+            if (vk is VK_LCONTROL or VK_RCONTROL or VK_LSHIFT or VK_RSHIFT or VK_PAUSE
+                or 0xA4 or 0xA5 or 0x5B or 0x5C || tray.Shortcuts.IsRegisteredPress(vk))
                 return;
 
+            tray.Shortcuts.CancelPending();
             Converter.ClearReconvert();
             if (ShortcutHeld() || InputTarget.Capture() is not { } target || target.IsPasswordEdit)
             {
@@ -193,6 +246,7 @@ internal static class Program
             if (!enabled) return;
             detector.OnKeyUp(vk);
             switchDetector.OnKeyUp(vk);
+            if (tray.Shortcuts.HasPending) tray.PostShortcutPoll();
         };
         hook.Install();
 

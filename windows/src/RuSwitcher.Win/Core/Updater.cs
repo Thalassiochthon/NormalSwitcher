@@ -14,10 +14,17 @@ namespace RuSwitcher.Win.Core;
 /// </summary>
 internal static class Updater
 {
+#if NORMALSWITCHER_UPDATE_SMOKE
+    // Only the disposable first build in the Windows integration test uses the fixture server.
+    private const string FeedUrl = "http://127.0.0.1:18443/version.json";
+    private const string ReleaseUrl = "http://127.0.0.1:18443/tag/win-v";
+    private const string InstallerUrl = "http://127.0.0.1:18443/download/win-v";
+#else
     private const string FeedUrl = "https://raw.githubusercontent.com/antonjas/NormalSwitcher/windows-preview/windows/version.json";
 
     private const string ReleaseUrl = "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v";
     private const string InstallerUrl = "https://github.com/antonjas/NormalSwitcher/releases/download/win-v";
+#endif
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{D729A5A6-DE1C-5068-A3B9-97BED831D11B}_is1";
     private const long MaxInstallerBytes = 256L * 1024 * 1024;
 

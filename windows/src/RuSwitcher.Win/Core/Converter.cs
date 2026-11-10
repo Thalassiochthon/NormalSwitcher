@@ -120,6 +120,15 @@ internal static class Converter
         IntPtr sourceHkl = LayoutSwitcher.Current();
         if (LayoutSwitcher.Opposite() is not { } targetHkl) return false;
 
+        return TransformSelection(sel => smart ? SmartConvert.Selection(sel, sourceHkl, targetHkl)
+            : KeyMapper.ConvertText(sel, sourceHkl, targetHkl));
+    }
+
+    internal static bool ChangeSelectionCase() => TransformSelection(text =>
+        text == text.ToUpperInvariant() ? text.ToLowerInvariant() : text.ToUpperInvariant());
+
+    private static bool TransformSelection(Func<string, string> transform)
+    {
         string? saved = SafeGetText();
         SafeClear();
         TextInjector.SendCtrl(VK_C);
@@ -127,9 +136,7 @@ internal static class Converter
         string sel = SafeGetText() ?? "";
         if (sel.Length == 0) { RestoreClipboard(saved); return false; }   // nothing selected
 
-        string converted = smart
-            ? SmartConvert.Selection(sel, sourceHkl, targetHkl)
-            : KeyMapper.ConvertText(sel, sourceHkl, targetHkl);
+        string converted = transform(sel);
         if (converted == sel) { RestoreClipboard(saved); return false; }  // no-op
 
         SafeSetText(converted);

@@ -50,6 +50,15 @@ internal static class LayoutSwitcher
             if (layout != current) yield return layout;
     }
 
+    internal static IntPtr Preferred(bool first)
+    {
+        var settings = Settings.Current;
+        var installed = Installed();
+        var preferred = new IntPtr(first ? settings.FirstLayout : settings.SecondLayout);
+        return preferred != IntPtr.Zero && installed.Contains(preferred)
+            ? preferred : installed.ElementAtOrDefault(first ? 0 : 1);
+    }
+
     /// <summary>Switch the focused window to <paramref name="hkl"/>.</summary>
     public static void SwitchTo(IntPtr hkl) => SwitchTo(hkl, GetForegroundWindow());
 

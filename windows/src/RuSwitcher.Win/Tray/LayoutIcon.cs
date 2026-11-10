@@ -16,7 +16,7 @@ internal static class LayoutIcon
         return culture.Name.Length == 0 ? "—" : culture.NativeName;
     }
 
-    public static Icon Create(IntPtr layout)
+    public static Icon Create(IntPtr layout, bool monochrome = false)
     {
         using var bitmap = new Bitmap(16, 16, PixelFormat.Format32bppArgb);
         using var g = Graphics.FromImage(bitmap);
@@ -26,7 +26,7 @@ internal static class LayoutIcon
         var blue = Color.FromArgb(35, 77, 164);
         var yellow = Color.FromArgb(255, 205, 42);
 
-        switch (code)
+        switch (monochrome ? "" : code)
         {
             case "ru": Bands(Color.White, blue, red); break;
             case "uk": Fill(blue, 0, 3, 16, 5); Fill(yellow, 0, 8, 16, 5); break;
@@ -63,7 +63,7 @@ internal static class LayoutIcon
                 Fill(red, 7, 3, 2, 10);
                 break;
             default:
-                Fill(Color.FromArgb(100, 48, 154), 0, 2, 16, 12);
+                Fill(monochrome ? Color.FromArgb(45, 45, 45) : Color.FromArgb(100, 48, 154), 0, 2, 16, 12);
                 using (var font = new Font("Segoe UI", 8, FontStyle.Bold, GraphicsUnit.Pixel))
                 using (var centered = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                     g.DrawString(code.ToUpperInvariant(), font, Brushes.White, new RectangleF(0, 2, 16, 12), centered);

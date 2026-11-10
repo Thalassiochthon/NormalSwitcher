@@ -43,6 +43,12 @@ public sealed class Settings
     public bool ExtendedDictionary { get; set; }
     public bool WordEndOnSpace { get; set; } = true;
     public Dictionary<string, string> Abbreviations { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<ShortcutAction, KeyChord> GlobalShortcuts { get; set; } = new();
+    public bool KeyboardEnabled { get; set; } = true;
+    public bool HideTrayIcon { get; set; }
+    public bool MonochromeTray { get; set; }
+    public bool CaretIndicator { get; set; }
+    public bool DebugLogging { get; set; }
     public string UiLanguage { get; set; } = "";
 
     internal bool HasAutomaticEdits => AutoConvert || FixTwoCaps || FixTypos || Abbreviations.Count > 0;
@@ -83,6 +89,7 @@ public sealed class Settings
     public bool ClipboardHistoryEnabled { get; set; }
     public bool ClipboardHistoryPersistent { get; set; }
     public ClipboardShortcut ClipboardHistoryShortcut { get; set; }
+    public KeyChord? ClipboardCustomShortcut { get; set; }
 
     public static Settings Current { get; } = Load();
 

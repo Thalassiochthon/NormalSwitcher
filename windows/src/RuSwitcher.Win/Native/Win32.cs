@@ -143,6 +143,13 @@ internal static class Win32
     public static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    public static extern IntPtr FindWindowW(string className, string title);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ClientToScreen(IntPtr window, ref POINT point);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     public static extern int GetClassNameW(IntPtr window, System.Text.StringBuilder name, int capacity);
 
     [DllImport("user32.dll")]
@@ -247,6 +254,8 @@ internal static class Win32
     public const uint NIF_TIP = 0x00000004;
     public const uint WM_APP = 0x8000;
     public const uint WM_TRAYICON = WM_APP + 1;
+    public const uint WM_SETTINGS = WM_APP + 3;
+    public const uint WM_SHORTCUTREADY = WM_APP + 4;
     public const uint WM_AUTOCONVERT = WM_APP + 2;   // auto-convert deferred off the LL-hook callback
     public const uint WM_HOTKEY = 0x0312;
     public const uint MOD_ALT = 0x0001;

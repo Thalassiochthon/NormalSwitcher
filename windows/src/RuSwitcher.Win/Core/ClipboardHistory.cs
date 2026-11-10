@@ -23,7 +23,7 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
     public void Initialize()
     {
         if (!Settings.Current.ClipboardHistoryEnabled) return;
-        Register(Settings.Current.ClipboardHistoryShortcut);
+        Register(DisplayShortcut);
         if (Settings.Current.ClipboardHistoryPersistent) Load();
     }
 
@@ -36,7 +36,7 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
         SkipCurrent();
         if (enabled)
         {
-            Register(settings.ClipboardHistoryShortcut);
+            Register(DisplayShortcut);
             _storageReady = true;
         }
         else Unregister();
@@ -58,30 +58,32 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
         catch { HasError = true; return false; }
     }
 
-    public bool SetShortcut(ClipboardShortcut shortcut)
+    private KeyChord DefaultShortcut => new(VK_V, Settings.Current.ClipboardHistoryShortcut switch
+    {
+        ClipboardShortcut.AltShiftV => MOD_ALT | MOD_SHIFT,
+        ClipboardShortcut.CtrlAltV => MOD_CONTROL | MOD_ALT,
+        _ => MOD_CONTROL | MOD_SHIFT
+    });
+
+    public KeyChord DisplayShortcut => Settings.Current.ClipboardCustomShortcut ?? DefaultShortcut;
+
+    public bool SetCustomShortcut(KeyChord? shortcut)
     {
         var settings = Settings.Current;
+        KeyChord previous = DisplayShortcut;
         Unregister();
-        if (settings.ClipboardHistoryEnabled && !Register(shortcut))
+        if (settings.ClipboardHistoryEnabled && !Register(shortcut ?? DefaultShortcut))
         {
-            Register(settings.ClipboardHistoryShortcut);
+            Register(previous);
             return false;
         }
-        settings.ClipboardHistoryShortcut = shortcut;
+        settings.ClipboardCustomShortcut = shortcut;
         settings.Save();
         return true;
     }
 
-    private bool Register(ClipboardShortcut shortcut)
-    {
-        uint keys = shortcut switch
-        {
-            ClipboardShortcut.AltShiftV => MOD_ALT | MOD_SHIFT,
-            ClipboardShortcut.CtrlAltV => MOD_CONTROL | MOD_ALT,
-            _ => MOD_CONTROL | MOD_SHIFT
-        };
-        return _registered = RegisterHotKey(window, HotkeyId, keys | MOD_NOREPEAT, VK_V);
-    }
+    private bool Register(KeyChord chord) => _registered = chord.IsValid
+        && RegisterHotKey(window, HotkeyId, chord.Modifiers | MOD_NOREPEAT, chord.Key);
 
     private void Unregister()
     {
