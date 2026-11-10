@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.3"><b>Скачать для macOS</b></a>
+  <a href="https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.4"><b>Скачать для macOS</b></a>
   ·
-  <a href="https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.4"><b>Скачать для Windows</b></a>
+  <a href="https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.5"><b>Скачать для Windows</b></a>
   ·
   <a href="https://github.com/antonjas/NormalSwitcher/releases">Все версии</a>
 </p>
@@ -29,13 +29,13 @@
 
 ## macOS
 
-Сборка для **Apple Silicon**. Требуется **macOS 13 или новее**. Откройте [страницу релиза macOS](https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.3), перенесите приложение в «Программы» и запустите. macOS попросит разрешения для работы с клавиатурой. В настройках NormalSwitcher можно выбрать пару раскладок, включить автоисправление и настроить историю буфера обмена.
+Сборка для **Apple Silicon**. Требуется **macOS 13 или новее**. Откройте [страницу релиза macOS](https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.4), перенесите приложение в «Программы» и запустите. macOS попросит разрешения для работы с клавиатурой. В настройках NormalSwitcher можно выбрать пару раскладок, включить автоисправление и настроить историю буфера обмена.
 
 [Исходники macOS](https://github.com/antonjas/NormalSwitcher/tree/personal/macos)
 
 ## Windows
 
-Для **предварительной версии** доступны установщик и переносимые сборки x64 и ARM64. Скачайте подходящий файл со [страницы релиза Windows](https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.4). После запуска настройки доступны по значку в области уведомлений. Автоисправление выключено по умолчанию. В этой версии оно работает в полях, где программа может проверить текст перед заменой.
+Для **предварительной версии** доступны установщик и переносимые сборки x64 и ARM64. Скачайте подходящий файл со [страницы релиза Windows](https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.5). После запуска настройки доступны по значку в области уведомлений. Автоисправление выключено по умолчанию. В этой версии оно работает в полях, где программа может проверить текст перед заменой.
 
 [Исходники и инструкция по сборке Windows](https://github.com/antonjas/NormalSwitcher/tree/windows-preview/windows)
 
