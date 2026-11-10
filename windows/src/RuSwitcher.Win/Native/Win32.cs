@@ -81,7 +81,9 @@ internal static class Win32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetKeyboardState(byte[] lpKeyState);
 
-    [DllImport("user32.dll")]
+    // Windows writes UTF-16 code units; the default ANSI marshaller can truncate
+    // non-Latin characters and give Windows a buffer smaller than cchBuff implies.
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     public static extern int ToUnicodeEx(uint wVirtKey, uint wScanCode, byte[] lpKeyState,
         [Out] char[] pwszBuff, int cchBuff, uint wFlags, IntPtr dwhkl);
 
