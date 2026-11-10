@@ -153,9 +153,12 @@ jobs:
           $v = '${{ steps.ver.outputs.version }}'
           $changes = "NormalSwitcher for Windows $v"
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $tagMessage = (git for-each-ref --format='%(contents)' "refs/tags/win-v$v") -join "`n"
-            if ((git cat-file -t "refs/tags/win-v$v") -eq 'tag' -and $tagMessage.Trim()) {
-              $changes = $tagMessage.Trim()
+            $ref = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/win-v$v" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or -not $ref) { throw 'Could not read the Windows release tag' }
+            if ($ref.object.type -eq 'tag') {
+              $tag = gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$($ref.object.sha)" | ConvertFrom-Json
+              if ($LASTEXITCODE -ne 0 -or -not $tag) { throw 'Could not read the Windows release notes' }
+              if ($tag.message.Trim()) { $changes = $tag.message.Trim() }
             }
           }
           $changes | Out-File -Encoding utf8 "$env:RUNNER_TEMP/windows-update-notes.txt"
@@ -169,7 +172,6 @@ jobs:
                       '--target', '${{ github.sha }}')
           if ('${{ steps.ver.outputs.prerelease }}' -eq 'true') { $ghArgs += '--prerelease' }
           gh release create @ghArgs
-
 
       - name: Announce the verified installer to installed copies
         shell: pwsh
