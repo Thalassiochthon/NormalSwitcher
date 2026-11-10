@@ -1,8 +1,0 @@
-{
-  "version": "1.1.2",
-  "build": "72",
-  "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.2",
-  "notes": "Новое окно обновления с текущей и новой версией, списком изменений и ходом установки. После установки NormalSwitcher запускается сам.\n\nA new update window shows both versions, release notes, and installation progress. NormalSwitcher restarts automatically after updating.\n",
-  "sha256": "f4874f8633dd9c9ee93f71cc0609644c0530b23aca327fd42897d93fdc18fbd4"
-}
