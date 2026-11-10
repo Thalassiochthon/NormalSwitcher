@@ -100,9 +100,9 @@ internal sealed class SettingsForm : Form
                 }));
 
         var triggers = Enum.GetValues<TriggerKind>().Select(TrayIcon.TriggerName).ToArray();
-        var configurable = Enum.GetValues<ShortcutAction>().Select(action =>
+        Control Shortcut(ShortcutAction action) =>
             ShortcutButton("hotkeys." + action, () => globalShortcuts.Get(action), chord => globalShortcuts.Set(action, chord),
-                () => globalShortcuts.IsRegistered(action)));
+                () => globalShortcuts.IsRegistered(action));
         AddPage("hotkeys",
             [Choice("settings.trigger", triggers, (int)s.Trigger, index =>
             {
@@ -118,7 +118,8 @@ internal sealed class SettingsForm : Form
                     s.Save();
                     SwitchChanged?.Invoke();
                 }),
-            .. configurable]);
+            .. Enum.GetValues<ShortcutAction>()
+                .Where(action => action is not (ShortcutAction.OpenTasks or ShortcutAction.CaptureTask)).Select(Shortcut)]);
 
         var exceptions = new Button { Text = L10n.T("settings.exceptions"), AutoSize = true };
         exceptions.Click += (_, _) => { using var form = new ExceptionsForm(); form.ShowDialog(this); };
@@ -164,6 +165,7 @@ internal sealed class SettingsForm : Form
         var tasks = new Button { Text = L10n.T("tasks.title"), AutoSize = true };
         tasks.Click += (_, _) => { openTasks?.Invoke(); Close(); };
         AddPage("clipboard", enabled, shortcut, persist, tasks,
+            Shortcut(ShortcutAction.OpenTasks), Shortcut(ShortcutAction.CaptureTask),
             Hint("clipboard.hint"));
 
         var openLog = new Button { Text = L10n.T("settings.log.open"), AutoSize = true };
