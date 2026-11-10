@@ -89,8 +89,18 @@ internal static class AutoConverter
 
         async Task<bool> Replace(string replacement, IntPtr layout, bool learn)
         {
-            if (replacement == typed || !stillCurrent() || !await input.MatchesTextAtCaretAsync(typed + suffix)
-                || !stillCurrent() || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
+            if (replacement == typed || !stillCurrent()) return false;
+            string expected = typed + suffix;
+            bool matched = await input.MatchesTextAtCaretAsync(expected);
+            // The receiving editor may still be processing the Space already passed by the hook.
+            for (int attempt = 0; !matched && suffix.Length > 0 && input.IsWritableNativeEdit
+                && attempt < 3 && stillCurrent(); attempt++)
+            {
+                await Task.Delay(12);
+                matched = stillCurrent() && input.HasPlainTextAtCaret(expected);
+            }
+            if (!matched || !stillCurrent()
+                || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
                 return false;
 
             if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout);

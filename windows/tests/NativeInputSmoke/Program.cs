@@ -21,20 +21,35 @@ internal static class Program
                 first.Focus();
                 await Until(() => GetForegroundWindow() == form.Handle && first.Focused, "fixture focus");
 
+                Clipboard.SetText("clipboard fixture");
+                await Task.Delay(650);
+                CheckRegistrationAndDispatch(1, 0x78); // Ctrl + Shift + F9.
+                await Until(IsClipboardMenuOpen, "clipboard menu");
+                Tap(0x28);
+                Tap(0x0D);
+                await Until(() => first.Text == "clipboard fixture", "history selection and paste");
+
+                first.SelectionStart = first.TextLength;
+                first.SelectionLength = 0;
+                CheckRegistrationAndDispatch(24, 0x77); // ChangeCase (20 + 4), Ctrl + Shift + F8.
+                await Until(() => first.Text == "CLIPBOARD FIXTURE", "configured change-case shortcut");
+
+                Console.WriteLine("Clipboard history and configured shortcut passed.");
+                first.Clear();
                 TypeShortcutWord();
-                await Task.Delay(50);
+                await Until(() => first.Text == "zz", "ordinary keyboard input before Space");
                 Tap(0x20);
                 await Until(() => first.Text == "NormalSwitcher ", "Space expansion");
 
                 first.Clear();
                 TypeShortcutWord();
-                await Task.Delay(50);
+                await Until(() => first.Text == "zz", "ordinary keyboard input before Enter");
                 Tap(0x0D);
                 await Until(() => first.Text == "NormalSwitcher\r\n", "Enter expansion");
 
                 first.Clear();
                 TypeShortcutWord();
-                await Task.Delay(50);
+                await Until(() => first.Text == "zz", "ordinary keyboard input before Tab");
                 Tap(0x09);
                 await Until(() => first.Text == "NormalSwitcher" && second.Focused, "Tab expansion and focus change");
 
@@ -49,19 +64,6 @@ internal static class Program
                 await Until(() => first.Text == "NormalSwitcher ", $"Unicode packet expansion (received {first.Text.Length} characters initially)");
                 Console.WriteLine("Unicode packet input passed.");
                 first.Clear();
-                Clipboard.SetText("clipboard fixture");
-                await Task.Delay(650);
-                CheckRegistrationAndDispatch(1, 0x78); // Ctrl + Shift + F9.
-                await Until(IsClipboardMenuOpen, "clipboard menu");
-                Tap(0x28);
-                Tap(0x0D);
-                await Until(() => first.Text == "clipboard fixture", "history selection and paste");
-
-                first.SelectionStart = first.TextLength;
-                first.SelectionLength = 0;
-                CheckRegistrationAndDispatch(24, 0x77); // ChangeCase (20 + 4), Ctrl + Shift + F8.
-                await Until(() => first.Text == "CLIPBOARD FIXTURE", "configured change-case shortcut");
-
                 Console.WriteLine("Space, Enter, Tab, clipboard history paste and custom shortcut passed.");
                 result = 0;
             }
