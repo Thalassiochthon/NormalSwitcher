@@ -31,6 +31,15 @@
 
 Сборка для **Apple Silicon**. Требуется **macOS 13 или новее**. Откройте [страницу релиза macOS](https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.1.6), перенесите приложение в «Программы» и запустите. macOS попросит разрешения для работы с клавиатурой. В настройках NormalSwitcher можно выбрать пару раскладок, включить автоисправление и настроить историю буфера обмена.
 
+Установить стабильную версию через Homebrew можно из этого репозитория:
+
+```sh
+brew tap thalassiochthon/normalswitcher https://github.com/Thalassiochthon/NormalSwitcher.git
+brew install --cask thalassiochthon/normalswitcher/normalswitcher
+```
+
+Команда `brew install --cask ruswitcher` устанавливает исходный проект RuSwitcher.
+
 [Исходники macOS](https://github.com/Thalassiochthon/NormalSwitcher/tree/personal/macos)
 
 ## Windows
