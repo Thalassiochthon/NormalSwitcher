@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace RuSwitcher.Win.Core;
@@ -71,22 +72,19 @@ internal static class SmartConvert
         return s.Substring(a, b - a);
     }
 
-    /// <summary>BCP-47-ish language tag from a keyboard layout handle (low word = LANGID).</summary>
+    /// <summary>Regional spelling locale from a keyboard layout handle (low word = LANGID).</summary>
     public static string LangTag(IntPtr hkl)
     {
-        int primary = (int)((long)hkl & 0x3FF);
-        return primary switch
+        int langId = (int)((long)hkl & 0xFFFF);
+        // The Spanish (Spain) traditional sort has its own LANGID but uses the same spelling.
+        if (langId == 0x040A) return "es-ES";
+        try
         {
-            0x19 => "ru",
-            0x09 => "en",
-            0x22 => "uk",
-            0x23 => "be",
-            0x02 => "bg",
-            0x0D => "he",
-            0x08 => "el",
-            0x2B => "hy",
-            0x37 => "ka",
-            _ => "en",
-        };
+            return CultureInfo.GetCultureInfo(langId).Name;
+        }
+        catch (CultureNotFoundException)
+        {
+            return "";
+        }
     }
 }

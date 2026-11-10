@@ -12,10 +12,30 @@ public class AutoConverterTests
     private static readonly ICollection<string> None = new List<string>();
 
     // A tiny fake dictionary: (word, langTag) pairs that are "real words".
-    private static Func<string, string, bool> Dict(params (string word, string tag)[] valid)
+    private static Func<string, string, bool?> Dict(params (string word, string tag)[] valid)
     {
         var set = new HashSet<(string, string)>(valid);
         return (w, t) => set.Contains((w, t));
+    }
+
+    [Theory]
+    [InlineData(0x040A040A, "es-ES")]
+    [InlineData(0x00000C0A, "es-ES")]
+    [InlineData(0x080A080A, "es-MX")]
+    [InlineData(0x04090409, "en-US")]
+    [InlineData(0x04190419, "ru-RU")]
+    public void Maps_keyboard_handles_to_regional_dictionary_tags(int handle, string tag) =>
+        Assert.Equal(tag, SmartConvert.LangTag(new IntPtr(handle)));
+
+    [Theory]
+    [InlineData("рщдф", "hola", "ru-RU", "es-ES")]
+    [InlineData("ghbdtn", "привет", "es-MX", "ru-RU")]
+    public void Converts_in_both_directions_with_spanish(string typed, string converted, string source, string target)
+    {
+        Assert.True(AutoConverter.ShouldConvertPure(typed, converted, source, target,
+            false, true, Dict((converted, target)), None, None));
+        Assert.False(AutoConverter.ShouldConvertPure(typed, converted, source, target,
+            false, true, (_, tag) => tag == target ? true : null, None, None));
     }
 
     [Fact]
@@ -109,8 +129,8 @@ public class AutoConverterTests
     public void Hebrew_converts_only_on_positive_signal_from_the_other_side()
     {
         // Typed in the Hebrew layout, its EN image is a real English word → convert.
-        bool r = AutoConverter.ShouldConvertPure("akuo", "hello", "he", "en",
-            caps: false, dictAvailable: true, Dict(("hello", "en")), None, None);
+        bool r = AutoConverter.ShouldConvertPure("akuo", "hello", "he-IL", "en-US",
+            caps: false, dictAvailable: true, Dict(("hello", "en-US")), None, None);
         Assert.True(r);
     }
 
@@ -118,7 +138,7 @@ public class AutoConverterTests
     public void Never_auto_converts_toward_hebrew()
     {
         // Typed on the non-Hebrew side: direction toward Hebrew is unresolvable → keep.
-        bool r = AutoConverter.ShouldConvertPure("hello", "אקkf", "en", "he",
+        bool r = AutoConverter.ShouldConvertPure("hello", "אקkf", "en-US", "he-IL",
             caps: false, dictAvailable: true, Dict(), None, None);
         Assert.False(r);
     }

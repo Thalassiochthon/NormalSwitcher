@@ -22,17 +22,24 @@ internal static class AutoConverter
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
 
         IntPtr sourceHkl = input.Layout;
-        if (LayoutSwitcher.Opposite() is not { } targetHkl) return false;
-
         string typed = KeyMapper.ConvertWord(keys, sourceHkl);
-        string converted = KeyMapper.ConvertWord(keys, targetHkl);
-        if (typed.Length != keys.Count || converted.Length != keys.Count || converted == typed) return false;
-
+        if (typed.Length != keys.Count) return false;
         string srcTag = SmartConvert.LangTag(sourceHkl);
-        string tgtTag = SmartConvert.LangTag(targetHkl);
         bool caps = keys.All(k => k.Caps);
 
-        if (!ShouldConvert(typed, converted, srcTag, tgtTag, caps)) return false;
+        IntPtr targetHkl = IntPtr.Zero;
+        string? converted = null;
+        foreach (var layout in LayoutSwitcher.Installed())
+        {
+            if (layout == sourceHkl) continue;
+            string candidate = KeyMapper.ConvertWord(keys, layout);
+            if (candidate.Length != keys.Count || candidate == typed) continue;
+            if (!ShouldConvert(typed, candidate, srcTag, SmartConvert.LangTag(layout), caps)) continue;
+            if (converted != null) return false; // More than one plausible destination.
+            targetHkl = layout;
+            converted = candidate;
+        }
+        if (converted == null) return false;
 
         if (!stillCurrent() || !input.HasPlainTextAtCaret(typed + " ") || !stillCurrent()
             || !TextInjector.Replace(backspaces: keys.Count + 1, text: converted + " "))
@@ -47,14 +54,14 @@ internal static class AutoConverter
     // so it can be unit-tested off Windows (no COM / no Win32).
     private static bool ShouldConvert(string typed, string converted, string srcTag, string tgtTag, bool caps) =>
         ShouldConvertPure(typed, converted, srcTag, tgtTag, caps,
-            Dict.Available, Dict.IsValidWord,
+            Dict.Available, Dict.CheckWord,
             Settings.Current.NeverConvert, Settings.Current.AlwaysConvert);
 
     /// <summary>The verdict logic, ported from the macOS <c>LayoutDetector.decide</c>. Pure: the
     /// dictionary and exception lists are passed in, so it is fully unit-testable. Returns true only
     /// when the word should be flipped to the opposite layout.</summary>
     internal static bool ShouldConvertPure(string typed, string converted, string srcTag, string tgtTag,
-        bool caps, bool dictAvailable, Func<string, string, bool> isValidWord,
+        bool caps, bool dictAvailable, Func<string, string, bool?> checkWord,
         ICollection<string> never, ICollection<string> always)
     {
         string typedLc = typed.ToLowerInvariant();
@@ -74,7 +81,8 @@ internal static class AutoConverter
         }
 
         // --- Hebrew cross-script pairs (positive signal only, from the non-Hebrew side) ---
-        bool srcHe = srcTag == "he", tgtHe = tgtTag == "he";
+        bool srcHe = srcTag == "he" || srcTag.StartsWith("he-", StringComparison.OrdinalIgnoreCase);
+        bool tgtHe = tgtTag == "he" || tgtTag.StartsWith("he-", StringComparison.OrdinalIgnoreCase);
         if (srcHe || tgtHe)
         {
             string sideTag = srcHe ? tgtTag : srcTag;
@@ -84,7 +92,7 @@ internal static class AutoConverter
                 // The EN image of correct Hebrew can be "word + punctuation" and falsely pass the
                 // dictionary — only feed it an all-letter image.
                 if (!converted.All(char.IsLetter)) return false;
-                return isValidWord(convertedLc, sideTag);
+                return checkWord(convertedLc, sideTag) == true;
             }
             // Typed on the non-Hebrew side: never auto-convert toward Hebrew (direction unresolvable
             // without a Hebrew dictionary — precision over recall). The manual trigger still works.
@@ -93,9 +101,7 @@ internal static class AutoConverter
 
         // --- common same-alphabet-swap case ---
         if (!dictAvailable) return false;
-        if (!isValidWord(convertedLc, tgtTag)) return false;   // flipped form isn't a real word → keep
-        if (isValidWord(typedLc, srcTag)) return false;        // typed form is already real → keep
-        return true;
+        return checkWord(convertedLc, tgtTag) == true && checkWord(typedLc, srcTag) == false;
     }
 
     private static bool IsAllCaps(string s) =>

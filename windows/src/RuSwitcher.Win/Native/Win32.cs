@@ -109,6 +109,7 @@ internal static class Win32
     public const ushort VK_HOME = 0x24;
     public const ushort VK_END = 0x23;
     public const uint MAPVK_VK_TO_VSC = 0;
+    public const uint MAPVK_VSC_TO_VK_EX = 3;
 
     [DllImport("user32.dll")]
     public static extern uint MapVirtualKeyExW(uint uCode, uint uMapType, IntPtr dwhkl);

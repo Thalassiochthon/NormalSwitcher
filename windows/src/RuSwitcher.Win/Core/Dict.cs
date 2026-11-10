@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace RuSwitcher.Win.Core;
 
@@ -24,37 +25,54 @@ internal static class Dict
 
     private static ISpellChecker? CheckerFor(string languageTag)
     {
-        if (Factory == null) return null;
+        if (Factory == null || languageTag.Length == 0) return null;
         if (Checkers.TryGetValue(languageTag, out var c)) return c;
         ISpellChecker? checker = null;
         try
         {
             if (Factory.IsSupported(languageTag) != 0)
                 checker = Factory.CreateSpellChecker(languageTag);
+            else
+            {
+                // A keyboard may use a different regional variant than the installed dictionary.
+                string prefix = languageTag.Split('-')[0] + "-";
+                var supported = Factory.get_SupportedLanguages();
+                try
+                {
+                    var tags = new string[1];
+                    while (supported.Next(1, tags, IntPtr.Zero) == 0)
+                    {
+                        if (!tags[0].StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                        checker = Factory.CreateSpellChecker(tags[0]);
+                        break;
+                    }
+                }
+                finally { Marshal.ReleaseComObject(supported); }
+            }
         }
         catch { checker = null; }
         Checkers[languageTag] = checker;
         return checker;
     }
 
-    /// <summary>True if <paramref name="word"/> is spelled correctly in <paramref name="languageTag"/>
-    /// (e.g. "ru", "en"). If the language/API is unavailable, returns false (unknown).</summary>
-    public static bool IsValidWord(string word, string languageTag)
+    public static bool IsValidWord(string word, string languageTag) => CheckWord(word, languageTag) == true;
+
+    /// <summary>True for correct spelling, false for a spelling error, null if unchecked.</summary>
+    public static bool? CheckWord(string word, string languageTag)
     {
         if (string.IsNullOrWhiteSpace(word)) return false;
         var checker = CheckerFor(languageTag);
-        if (checker == null) return false;
+        if (checker == null) return null;
         try
         {
             IEnumSpellingError errors = checker.Check(word);
             // Next() returns S_OK (0) with an error, or S_FALSE (1) with null when there are none.
             int hr = errors.Next(out ISpellingError? err);
-            bool hasError = hr == 0 && err != null;
             if (err != null) Marshal.ReleaseComObject(err);
             Marshal.ReleaseComObject(errors);
-            return !hasError;
+            return hr switch { 0 => false, 1 => true, _ => null };
         }
-        catch { return false; }
+        catch { return null; }
     }
 }
 
@@ -66,9 +84,7 @@ internal class SpellCheckerFactory { }
 [ComImport, Guid("8E018A9D-2415-4677-BF08-794EA61F94BB"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 internal interface ISpellCheckerFactory
 {
-    // Vtable order from ISpellCheckerFactory. get_SupportedLanguages is first; declared as a
-    // placeholder so the later slots line up.
-    [return: MarshalAs(UnmanagedType.Interface)] object get_SupportedLanguages();
+    IEnumString get_SupportedLanguages();
     int IsSupported([MarshalAs(UnmanagedType.LPWStr)] string languageTag);
     [return: MarshalAs(UnmanagedType.Interface)] ISpellChecker CreateSpellChecker([MarshalAs(UnmanagedType.LPWStr)] string languageTag);
 }

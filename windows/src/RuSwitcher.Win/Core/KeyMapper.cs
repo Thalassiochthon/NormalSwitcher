@@ -25,7 +25,11 @@ internal static class KeyMapper
         var buf = new char[8];
         // wFlags bit 2 (0x4): do not change the keyboard state (avoids clobbering real dead-key
         // state). Dead-key edge cases are deferred, mirroring the macOS NoDeadKeys approach.
-        int n = ToUnicodeEx(key.VkCode, key.ScanCode, state, buf, buf.Length, 0x4, hkl);
+        // The captured VK belongs to the active layout. OEM keys (such as Spanish ñ) can
+        // have a different VK in the destination even when the physical key is the same.
+        uint mappedVk = MapVirtualKeyExW(key.ScanCode, MAPVK_VSC_TO_VK_EX, hkl);
+        uint vk = mappedVk == 0 ? key.VkCode : mappedVk;
+        int n = ToUnicodeEx(vk, key.ScanCode, state, buf, buf.Length, 0x4, hkl);
         return n >= 1 ? buf[0] : null;
     }
 
