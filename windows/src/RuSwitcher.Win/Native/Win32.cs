@@ -136,7 +136,7 @@ internal static class Win32
 
     public const uint GUI_INMENUMODE = 0x04, GUI_SYSTEMMENUMODE = 0x08, GUI_POPUPMENUMODE = 0x10;
     public const int GWL_STYLE = -16, ES_PASSWORD = 0x20, ES_READONLY = 0x800;
-    public const uint EM_GETSEL = 0x00B0, WM_GETTEXT = 0x000D, SMTO_ABORTIFHUNG = 0x02;
+    public const uint EM_GETSEL = 0x00B0, EM_SETSEL = 0x00B1, WM_GETTEXT = 0x000D, SMTO_ABORTIFHUNG = 0x02;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

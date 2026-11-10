@@ -130,13 +130,35 @@ internal static class Converter
 
     internal static bool ChangeSelectionCase(bool wholeLine)
     {
+        if (InputTarget.Capture() is { IsWritableNativeEdit: true } target)
+        {
+            if (!target.TryReadNativeEdit(out var text, out int start, out int end)) return false;
+            if (wholeLine)
+            {
+                int previousLine = start > 0 ? text.LastIndexOf('\n', start - 1) : -1;
+                int nextLine = text.IndexOf('\n', end);
+                start = previousLine + 1;
+                end = nextLine < 0 ? text.Length : nextLine;
+                if (end > start && text[end - 1] == '\r') end--;
+            }
+            if (end <= start || InputTarget.Capture() is not { } focused || !target.SameControl(focused)) return false;
+            string selection = text[start..end];
+            string changed = ToggleCase(selection);
+            return changed != selection && target.SelectNativeRange(start, end)
+                && InputTarget.Capture() is { } active && target.SameControl(active)
+                && TextInjector.Replace(0, changed);
+        }
+
         if (wholeLine)
         {
             TextInjector.SendShift(VK_HOME);
             Thread.Sleep(40);
         }
-        return TransformSelection(text => text == text.ToUpperInvariant() ? text.ToLowerInvariant() : text.ToUpperInvariant());
+        return TransformSelection(ToggleCase);
     }
+
+    private static string ToggleCase(string text) =>
+        text == text.ToUpperInvariant() ? text.ToLowerInvariant() : text.ToUpperInvariant();
 
     internal static void WithSelectedWord(Action<string> action)
     {

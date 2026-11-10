@@ -31,24 +31,34 @@ internal readonly record struct InputTarget(IntPtr Foreground, IntPtr Focus, Int
         IsNativeEdit() && (GetWindowLongW(Focus, GWL_STYLE) & (ES_PASSWORD | ES_READONLY)) == 0;
 
     /// <summary>Automatic editing requires a verifiable caret and exact suffix in a plain Win32 edit.</summary>
-    public bool HasPlainTextAtCaret(string suffix)
+    public bool HasPlainTextAtCaret(string suffix) =>
+        TryReadNativeEdit(out string text, out int start, out int end) && MatchesSuffix(text, start, end, suffix);
+
+    internal bool TryReadNativeEdit(out string text, out int start, out int end)
     {
+        text = "";
+        start = end = 0;
         if (!IsWritableNativeEdit) return false;
         if (SendMessageTimeoutW(Focus, EM_GETSEL, IntPtr.Zero, IntPtr.Zero,
                 SMTO_ABORTIFHUNG, 20, out var selection) == IntPtr.Zero)
             return false;
         long packed = selection.ToInt64();
         if (packed < 0) return false;
-        int start = (int)(packed & 0xFFFF), end = (int)((packed >> 16) & 0xFFFF);
+        start = (int)(packed & 0xFFFF);
+        end = (int)((packed >> 16) & 0xFFFF);
         const int maxRead = 4096;
-        if (start != end || end < suffix.Length || end > maxRead) return false;
+        if (end > maxRead) return false;
 
-        var text = new StringBuilder(maxRead + 1);
-        if (SendMessageTimeoutTextW(Focus, WM_GETTEXT, (IntPtr)text.Capacity, text,
+        var buffer = new StringBuilder(maxRead + 1);
+        if (SendMessageTimeoutTextW(Focus, WM_GETTEXT, (IntPtr)buffer.Capacity, buffer,
                 SMTO_ABORTIFHUNG, 20, out _) == IntPtr.Zero)
             return false;
-        return MatchesSuffix(text.ToString(), start, end, suffix);
+        text = buffer.ToString();
+        return start <= end && end <= text.Length;
     }
+
+    internal bool SelectNativeRange(int start, int end) =>
+        SendMessageTimeoutW(Focus, EM_SETSEL, (IntPtr)start, (IntPtr)end, SMTO_ABORTIFHUNG, 20, out _) != IntPtr.Zero;
 
     internal static bool MatchesSuffix(string text, int start, int end, string suffix) =>
         suffix.Length > 0 && start == end && end >= suffix.Length && end <= text.Length

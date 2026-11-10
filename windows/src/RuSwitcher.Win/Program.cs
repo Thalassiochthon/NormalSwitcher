@@ -189,6 +189,7 @@ internal static class Program
         tray.ClipboardHistory.Pasted += ResetInput;
         tray.Shortcuts.Activated += async action =>
         {
+            Log($"shortcut action={action}");
             if (!enabled || InputTarget.Capture() is not { IsPasswordEdit: false } target) return;
             switch (action)
             {
