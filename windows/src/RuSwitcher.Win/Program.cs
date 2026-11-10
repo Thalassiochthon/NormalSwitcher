@@ -253,10 +253,12 @@ internal static class Program
                 wordTarget = target;
             }
 
+            char? packet = settings.RemoteDesktopMode && vk == 0xE7 && sc is > 0 and <= char.MaxValue
+                ? (char)sc : null;
             uint deferredKey = 0;
             if (!buffer.IsEmpty && settings.HasAutomaticEdits && !IsDown(VK_SHIFT))
             {
-                bool space = vk == KeystrokeBuffer.VK_SPACE && settings.WordEndOnSpace;
+                bool space = (vk == KeystrokeBuffer.VK_SPACE || packet == ' ') && settings.WordEndOnSpace;
                 bool deferred = (vk == KeystrokeBuffer.VK_RETURN && settings.WordEndOnEnter
                     || vk == KeystrokeBuffer.VK_TAB && settings.WordEndOnTab) && target.IsWritableNativeEdit;
                 if ((space || deferred) && tray.PostAutoConvert())
@@ -265,11 +267,11 @@ internal static class Program
                     pendingAuto = (new List<TypedKey>(buffer.CurrentWord), target, inputGeneration, deferredKey);
                 }
             }
-            if (KeystrokeBuffer.IsTypingKey(vk))
+            if (KeystrokeBuffer.IsTypingKey(vk) || packet is { } literal && !char.IsWhiteSpace(literal) && !char.IsControl(literal))
             {
                 bool shift = IsDown(VK_SHIFT);
                 bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-                buffer.Append(new TypedKey(vk, sc, shift, caps));
+                buffer.Append(new TypedKey(vk, sc, shift, caps, packet));
             }
             else buffer.Reset();
             return deferredKey != 0;

@@ -2,7 +2,7 @@ namespace RuSwitcher.Win.Core;
 
 /// <summary>One captured key press: virtual-key + scancode, plus the modifier state
 /// needed to reproduce the character in another layout. The Windows TypedKey.</summary>
-public readonly record struct TypedKey(uint VkCode, uint ScanCode, bool Shift, bool Caps);
+public readonly record struct TypedKey(uint VkCode, uint ScanCode, bool Shift, bool Caps, char? Literal = null);
 
 /// <summary>
 /// Buffer of the word being typed — the Windows counterpart of the macOS

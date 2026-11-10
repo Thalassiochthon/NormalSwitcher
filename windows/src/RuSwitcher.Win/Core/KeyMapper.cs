@@ -18,6 +18,7 @@ internal static class KeyMapper
     /// <summary>Reproduce one key's character in a specific layout, honoring Shift/Caps.</summary>
     public static char? TranslateIn(TypedKey key, IntPtr hkl)
     {
+        if (key.Literal is { } literal) return literal;
         var state = new byte[256];
         if (key.Shift) state[0x10] = 0x80;               // VK_SHIFT down
         if (key.Caps) state[0x14] = 0x01;                // VK_CAPITAL toggled
@@ -44,6 +45,35 @@ internal static class KeyMapper
             if (c is { } ch) sb.Append(ch);
         }
         return sb.ToString();
+    }
+
+    internal static string ConvertWord(IReadOnlyList<TypedKey> keys, IntPtr source, IntPtr target)
+    {
+        if (!keys.Any(key => key.Literal.HasValue)) return ConvertWord(keys, target);
+        var map = BuildPairMap(source, target);
+        var text = new System.Text.StringBuilder(keys.Count);
+        foreach (var key in keys)
+        {
+            if (key.Literal is { } literal)
+                text.Append(map.GetValueOrDefault(literal, literal));
+            else if (TranslateIn(key, target) is { } mapped)
+                text.Append(mapped);
+        }
+        return text.ToString();
+    }
+
+    internal static IntPtr TextLayout(IReadOnlyList<TypedKey> keys, IntPtr actual)
+    {
+        // Unicode packets can bypass the guest's active layout. Only infer direction for the
+        // unambiguous Latin/Cyrillic pair; keep the real layout for all other combinations.
+        if (!keys.All(key => key.Literal.HasValue)) return actual;
+        var pair = new[] { LayoutSwitcher.Preferred(true), LayoutSwitcher.Preferred(false) };
+        var latin = pair.FirstOrDefault(layout => (layout.ToInt64() & 0x3FF) == 0x09);
+        var cyrillic = pair.FirstOrDefault(layout => (layout.ToInt64() & 0x3FF) == 0x19);
+        if (latin == IntPtr.Zero || cyrillic == IntPtr.Zero) return actual;
+        bool hasLatin = keys.Any(key => key.Literal is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z'));
+        bool hasCyrillic = keys.Any(key => key.Literal is >= 'Ѐ' and <= 'ӿ');
+        return hasLatin == hasCyrillic ? actual : hasCyrillic ? cyrillic : latin;
     }
 
     // Character-producing keys (digits, letters, OEM punctuation) — the Windows analog of the

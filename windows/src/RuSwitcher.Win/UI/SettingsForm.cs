@@ -124,6 +124,7 @@ internal sealed class SettingsForm : Form
             Check("settings.smart", s.SmartConversion, value => { s.SmartConversion = value; s.Save(); }),
             Check("settings.byText", s.ConvertByText, value => { s.ConvertByText = value; s.Save(); }),
             Check("settings.updates", s.CheckUpdatesEnabled, value => { s.CheckUpdatesEnabled = value; s.Save(); }),
+            Check("settings.remote", s.RemoteDesktopMode, value => { s.RemoteDesktopMode = value; s.Save(); }),
             Check("settings.log.enable", s.DebugLogging, value => { s.DebugLogging = value; s.Save(); }),
             openLog);
 

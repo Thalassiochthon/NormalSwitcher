@@ -45,11 +45,13 @@ internal static class Converter
     {
         if (buffer.IsEmpty) return false;
 
-        IntPtr sourceHkl = LayoutSwitcher.Current();
-        if (LayoutSwitcher.Opposite() is not { } targetHkl) return false;
+        IntPtr activeHkl = LayoutSwitcher.Current();
+        var keys = buffer.CurrentWord;
+        IntPtr sourceHkl = KeyMapper.TextLayout(keys, activeHkl);
+        IntPtr targetHkl = LayoutSwitcher.ConversionTargets(sourceHkl).FirstOrDefault();
+        if (targetHkl == IntPtr.Zero) return false;
 
         // Split off trailing real punctuation (kept as typed).
-        var keys = buffer.CurrentWord;
         int coreCount = keys.Count;
         var suffix = new System.Text.StringBuilder();
         while (coreCount > 0 &&
@@ -64,7 +66,7 @@ internal static class Converter
         for (int i = 0; i < coreCount; i++) core.Add(keys[i]);
         string suf = suffix.ToString();
 
-        string convertedCore = KeyMapper.ConvertWord(core, targetHkl);
+        string convertedCore = KeyMapper.ConvertWord(core, sourceHkl, targetHkl);
         if (convertedCore.Length == 0) return false;
         string originalCore = KeyMapper.ConvertWord(core, sourceHkl);  // as it was typed
 

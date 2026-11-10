@@ -20,21 +20,22 @@ internal static class AutoConverter
     public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ")
     {
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
-        if (Settings.Current.ExcludedApps.Count > 0
+        var settings = Settings.Current;
+        if ((settings.ExcludedApps.Count > 0 || settings.RemoteDesktopMode)
             && AppLayoutTracker.ProcessName(input.Foreground) is { } process
-            && Settings.Current.ExcludedApps.Contains(process, StringComparer.OrdinalIgnoreCase))
+            && (settings.ExcludedApps.Contains(process, StringComparer.OrdinalIgnoreCase)
+                || (settings.RemoteDesktopMode && process is "mstsc" or "msrdc")))
             return false;
 
-        IntPtr sourceHkl = input.Layout;
+        IntPtr sourceHkl = KeyMapper.TextLayout(keys, input.Layout);
         string typed = KeyMapper.ConvertWord(keys, sourceHkl);
         if (typed.Length != keys.Count) return false;
         string srcTag = SmartConvert.LangTag(sourceHkl);
         bool caps = keys.All(k => k.Caps);
 
-        var settings = Settings.Current;
         string lower = typed.ToLowerInvariant();
         if (settings.Abbreviations.TryGetValue(lower, out string? expansion) && !string.IsNullOrEmpty(expansion))
-            return await Replace(expansion, sourceHkl, learn: false);
+            return await Replace(expansion, input.Layout, learn: false);
         if (settings.NeverConvert.Contains(lower)) return false;
 
         var targets = LayoutSwitcher.ConversionTargets(sourceHkl).ToArray();
@@ -44,7 +45,7 @@ internal static class AutoConverter
         {
             foreach (var layout in targets)
             {
-                string candidate = KeyMapper.ConvertWord(keys, layout);
+                string candidate = KeyMapper.ConvertWord(keys, sourceHkl, layout);
                 if (candidate.Length != keys.Count || candidate == typed) continue;
                 string targetTag = SmartConvert.LangTag(layout);
                 if (!ShouldConvertPure(typed, candidate, srcTag, targetTag, caps, Dict.Available,
@@ -59,6 +60,7 @@ internal static class AutoConverter
         }
         if (converted != null) return await Replace(converted, targetHkl, learn: true);
 
+        if (keys.Any(key => key.Literal.HasValue)) return false;
         if (settings.FixTypos && targets.Length == 1 &&
             TextFixes.Number(keys, typed, key => KeyMapper.TranslateIn(key, targets[0])) is { } number)
             return await Replace(number, sourceHkl, learn: true);
@@ -81,8 +83,8 @@ internal static class AutoConverter
                 || !stillCurrent() || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
                 return false;
 
-            if (layout != sourceHkl) LayoutSwitcher.SwitchTo(layout);
-            Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, sourceHkl, learn);
+            if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout);
+            Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, input.Layout, learn);
             return true;
         }
     }

@@ -71,6 +71,7 @@ try {
         UiLanguage = 'en'
         WordEndOnEnter = $true
         WordEndOnTab = $true
+        RemoteDesktopMode = $true
         Abbreviations = @{ zz = 'NormalSwitcher' }
         ClipboardHistoryEnabled = $true
         ClipboardHistoryPersistent = $true

@@ -61,6 +61,7 @@ public sealed class Settings
     public bool HideTrayIcon { get; set; }
     public bool MonochromeTray { get; set; }
     public bool CaretIndicator { get; set; }
+    public bool RemoteDesktopMode { get; set; }
     public bool DebugLogging { get; set; }
     public string UiLanguage { get; set; } = "";
 

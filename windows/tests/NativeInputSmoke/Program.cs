@@ -38,7 +38,15 @@ internal static class Program
                 Tap(0x09);
                 await Until(() => first.Text == "NormalSwitcher" && second.Focused, "Tab expansion and focus change");
 
+                Console.WriteLine("Space, Enter and Tab passed.");
                 first.Focus();
+                first.Clear();
+                Unicode('z');
+                Unicode('z');
+                await Task.Delay(50);
+                Unicode(' ');
+                await Until(() => first.Text == "NormalSwitcher ", "Unicode packet expansion");
+                Console.WriteLine("Unicode packet input passed.");
                 first.Clear();
                 Clipboard.SetText("clipboard fixture");
                 await Task.Delay(650);
@@ -148,6 +156,29 @@ internal static class Program
 
     private static void Send(byte key, bool up) =>
         keybd_event(key, (byte)MapVirtualKeyW(key, 0), up ? 2u : 0u, IntPtr.Zero);
+
+    private static void Unicode(char character)
+    {
+        NativeInput[] keys =
+        [
+            new() { Type = 1, Scan = character, Flags = 4 },
+            new() { Type = 1, Scan = character, Flags = 6 },
+        ];
+        if (SendInput(2, keys, Marshal.SizeOf<NativeInput>()) != 2)
+            throw new InvalidOperationException("Could not send Unicode input");
+    }
+
+    // The smoke executable is x64. KEYBDINPUT begins at offset 8 in the 40-byte INPUT union.
+    [StructLayout(LayoutKind.Explicit, Size = 40)]
+    private struct NativeInput
+    {
+        [FieldOffset(0)] public uint Type;
+        [FieldOffset(10)] public ushort Scan;
+        [FieldOffset(12)] public uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint SendInput(uint count, NativeInput[] inputs, int size);
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte key, byte scan, uint flags, IntPtr extra);
