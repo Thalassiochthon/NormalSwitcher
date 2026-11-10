@@ -1,6 +1,6 @@
 {
-  "version": "0.2.1",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.1",
-  "notes": "Новое окно обновления NormalSwitcher показывает версии, изменения и ход установки. Установка идёт в фоне, после неё приложение запускается само.\n\nThe new NormalSwitcher update window shows both versions, release notes, and installation progress. Setup runs in the background and the app restarts automatically.",
-  "sha256": "8f795883f303160a89d28fdb1ded5dc061357cc2f86bd6093536d0e1f8c50216"
+  "version": "0.2.2",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.2",
+  "notes": "Новые настройки Windows с боковой навигацией и фиксированным окном. Интерфейс следует системному масштабу каждого монитора. Обновлён раздел «О программе».\n\nRedesigned Windows settings with sidebar navigation and a fixed-size window that follows each monitor's Windows scaling. The About page has also been refreshed.",
+  "sha256": "840d99d7f84d2d8cdbaf2fd387c798b86e5f39e5978d59de9da8dce1daa265d8"
 }
