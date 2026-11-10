@@ -7,6 +7,7 @@ internal static class Win32
 {
     // --- Hook ---
     public const int WH_KEYBOARD_LL = 13;
+    public const int WH_MOUSE_LL = 14;
     public const int HC_ACTION = 0;
     public const int WM_KEYDOWN = 0x0100;
     public const int WM_SYSKEYDOWN = 0x0104;
@@ -123,6 +124,36 @@ internal static class Win32
 
     [DllImport("user32.dll")]
     public static extern IntPtr PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GUITHREADINFO
+    {
+        public uint cbSize, flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+        public int caretLeft, caretTop, caretRight, caretBottom;
+    }
+
+    public const uint GUI_INMENUMODE = 0x04, GUI_SYSTEMMENUMODE = 0x08, GUI_POPUPMENUMODE = 0x10;
+    public const int GWL_STYLE = -16, ES_PASSWORD = 0x20, ES_READONLY = 0x800;
+    public const uint EM_GETSEL = 0x00B0, WM_GETTEXT = 0x000D, SMTO_ABORTIFHUNG = 0x02;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    public static extern int GetClassNameW(IntPtr window, System.Text.StringBuilder name, int capacity);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLongW(IntPtr window, int index);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    public static extern IntPtr SendMessageTimeoutW(IntPtr window, uint message, IntPtr wParam,
+        IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    public static extern IntPtr SendMessageTimeoutTextW(IntPtr window, uint message, IntPtr wParam,
+        System.Text.StringBuilder text, uint flags, uint timeout, out IntPtr result);
 
     // --- Foreground-app tracking (per-app layout memory) ---
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;

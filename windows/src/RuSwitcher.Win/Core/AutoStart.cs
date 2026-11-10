@@ -7,7 +7,7 @@ namespace RuSwitcher.Win.Core;
 internal static class AutoStart
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "RuSwitcher";
+    private const string ValueName = "NormalSwitcher";
 
     public static bool IsEnabled()
     {

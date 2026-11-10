@@ -17,16 +17,16 @@ internal static class AutoConverter
     /// converted word followed by a space. Deferring off the hook thread keeps the callback O(1) and
     /// avoids the LowLevelHooksTimeout / silent-unhook trap (COM + SendInput must not run in-callback).
     /// Returns true if it converted; on "keep" it does nothing (the word + space stay as typed).</summary>
-    public static bool TryConvertWord(IReadOnlyList<TypedKey> keys)
+    public static bool TryConvertWord(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent)
     {
-        if (keys.Count == 0) return false;
+        if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
 
-        IntPtr sourceHkl = LayoutSwitcher.Current();
+        IntPtr sourceHkl = input.Layout;
         if (LayoutSwitcher.Opposite() is not { } targetHkl) return false;
 
         string typed = KeyMapper.ConvertWord(keys, sourceHkl);
         string converted = KeyMapper.ConvertWord(keys, targetHkl);
-        if (converted.Length == 0 || converted == typed) return false;
+        if (typed.Length != keys.Count || converted.Length != keys.Count || converted == typed) return false;
 
         string srcTag = SmartConvert.LangTag(sourceHkl);
         string tgtTag = SmartConvert.LangTag(targetHkl);
@@ -34,9 +34,12 @@ internal static class AutoConverter
 
         if (!ShouldConvert(typed, converted, srcTag, tgtTag, caps)) return false;
 
-        TextInjector.Replace(backspaces: keys.Count + 1, text: converted + " ");
+        if (!stillCurrent() || !input.HasPlainTextAtCaret(typed + " ") || !stillCurrent()
+            || !TextInjector.Replace(backspaces: keys.Count + 1, text: converted + " "))
+            return false;
+
         LayoutSwitcher.SwitchTo(targetHkl);
-        Converter.NoteAutoConversion(converted, typed, targetHkl, sourceHkl);
+        Converter.NoteAutoConversion(converted + " ", typed + " ", targetHkl, sourceHkl);
         return true;
     }
 
@@ -58,8 +61,8 @@ internal static class AutoConverter
         string convertedLc = converted.ToLowerInvariant();
 
         // Explicit overrides (checked before the soft vetoes).
+        if (never.Contains(typedLc) || never.Contains(convertedLc)) return false;
         if (always.Contains(convertedLc)) return true;
-        if (never.Contains(typedLc)) return false;
 
         // --- soft vetoes (cheap, before the dictionary) ---
         if (typed.Length < 3) return false;                 // 1–2 letters: too many cross-layout collisions

@@ -24,6 +24,7 @@ internal sealed class TrayIcon : IDisposable
     private readonly WndProc _wndProc;
     private IntPtr _hwnd;
     private NOTIFYICONDATA _nid;
+    private System.Drawing.Icon? _icon;
     private bool _enabled = true;
 
     public event Action<bool>? EnabledChanged;
@@ -60,13 +61,15 @@ internal sealed class TrayIcon : IDisposable
         {
             lpfnWndProc = _wndProc,
             hInstance = hInstance,
-            lpszClassName = "RuSwitcherTrayWindow",
+            lpszClassName = "NormalSwitcherTrayWindow",
         };
         RegisterClassW(ref wc);
 
-        _hwnd = CreateWindowExW(0, "RuSwitcherTrayWindow", "RuSwitcher",
+        _hwnd = CreateWindowExW(0, "NormalSwitcherTrayWindow", "NormalSwitcher",
             0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
+        if (Environment.ProcessPath is { } path)
+            _icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
         _nid = new NOTIFYICONDATA
         {
             cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<NOTIFYICONDATA>(),
@@ -74,7 +77,7 @@ internal sealed class TrayIcon : IDisposable
             uID = 1,
             uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage = WM_TRAYICON,
-            hIcon = LoadIconW(IntPtr.Zero, IDI_APPLICATION),
+            hIcon = _icon?.Handle ?? LoadIconW(IntPtr.Zero, IDI_APPLICATION),
             szTip = tooltip,
         };
         Shell_NotifyIconW(NIM_ADD, ref _nid);
@@ -197,5 +200,7 @@ internal sealed class TrayIcon : IDisposable
             DestroyWindow(_hwnd);
             _hwnd = IntPtr.Zero;
         }
+        _icon?.Dispose();
+        _icon = null;
     }
 }

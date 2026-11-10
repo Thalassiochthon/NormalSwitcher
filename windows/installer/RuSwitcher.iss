@@ -1,28 +1,28 @@
-; Inno Setup script for RuSwitcher (Windows).
+; Inno Setup script for NormalSwitcher (Windows).
 ; Packages the self-contained single-file exe into a per-user installer with a Start-Menu
 ; shortcut and an uninstaller. Autostart is handled by the app itself (Settings → "Launch at
 ; startup"), so the installer does not add a Run key. Compiled by the windows-release CI (ISCC).
 ;
 ; Expected defines (passed by CI with /D...):
-;   MyAppVersion  — e.g. 0.9.0
-;   SourceExe     — path to the published RuSwitcher.exe
+;   MyAppVersion  — e.g. 0.1.0
+;   SourceExe     — path to the published NormalSwitcher.exe
 ; Falls back to sensible defaults for a local compile.
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif
 #ifndef SourceExe
-  #define SourceExe "..\src\RuSwitcher.Win\bin\Release\net8.0-windows\win-x64\publish\RuSwitcher.exe"
+  #define SourceExe "..\src\RuSwitcher.Win\bin\Release\net8.0-windows\win-x64\publish\NormalSwitcher.exe"
 #endif
 
-#define MyAppName "RuSwitcher"
-#define MyAppPublisher "RuSwitcher"
-#define MyAppURL "https://github.com/rashn/RuSwitcher"
-#define MyAppExeName "RuSwitcher.exe"
+#define MyAppName "NormalSwitcher"
+#define MyAppPublisher "NormalSwitcher"
+#define MyAppURL "https://github.com/antonjas/NormalSwitcher"
+#define MyAppExeName "NormalSwitcher.exe"
 
 [Setup]
 ; A stable AppId ties upgrades/uninstalls together across versions — never change it.
-AppId={{A3F5C1E2-7B94-4D6A-9E31-2C8F5A1B6D40}
+AppId={{D729A5A6-DE1C-5068-A3B9-97BED831D11B}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -34,7 +34,7 @@ DisableProgramGroupPage=yes
 ; Per-user install → no UAC elevation needed (matches a menu-bar utility's footprint).
 PrivilegesRequired=lowest
 OutputDir=dist
-OutputBaseFilename=RuSwitcher-Setup-{#MyAppVersion}
+OutputBaseFilename=NormalSwitcher-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

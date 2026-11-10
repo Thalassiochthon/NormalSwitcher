@@ -13,7 +13,11 @@ internal sealed class KeyboardHook : IDisposable
     // The delegate MUST be held in a field: if it is collected, the native callback points at
     // freed memory and the process crashes. (Classic P/Invoke hook pitfall.)
     private readonly LowLevelKeyboardProc _proc;
+    private readonly LowLevelKeyboardProc _mouseProc;
     private IntPtr _hook;
+    private IntPtr _mouseHook;
+
+    public event Action? MousePressed;
 
     /// <summary>(vkCode, scanCode) of a real key press.</summary>
     public event Action<uint, uint>? KeyDown;
@@ -21,13 +25,27 @@ internal sealed class KeyboardHook : IDisposable
     /// <summary>(vkCode, scanCode) of a real key release — needed for modifier double-tap.</summary>
     public event Action<uint, uint>? KeyUp;
 
-    public KeyboardHook() => _proc = HookCallback;
+    public KeyboardHook()
+    {
+        _proc = HookCallback;
+        _mouseProc = MouseCallback;
+    }
 
     public void Install()
     {
         _hook = SetWindowsHookExW(WH_KEYBOARD_LL, _proc, GetModuleHandleW(null), 0);
         if (_hook == IntPtr.Zero)
             throw new InvalidOperationException($"SetWindowsHookEx failed (error {Marshal.GetLastWin32Error()})");
+        _mouseHook = SetWindowsHookExW(WH_MOUSE_LL, _mouseProc, GetModuleHandleW(null), 0);
+        if (_mouseHook == IntPtr.Zero)
+            throw new InvalidOperationException($"Mouse hook failed (error {Marshal.GetLastWin32Error()})");
+    }
+
+    private IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode == HC_ACTION && (int)wParam is 0x0201 or 0x0204 or 0x0207 or 0x020B)
+            MousePressed?.Invoke();
+        return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -54,6 +72,11 @@ internal sealed class KeyboardHook : IDisposable
 
     public void Dispose()
     {
+        if (_mouseHook != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = IntPtr.Zero;
+        }
         if (_hook != IntPtr.Zero)
         {
             UnhookWindowsHookEx(_hook);

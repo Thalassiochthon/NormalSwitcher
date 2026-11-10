@@ -82,9 +82,11 @@ internal sealed class SettingsForm : Form
         var btnExceptions = new Button { Text = L10n.T("settings.exceptions"), Left = 16, Top = y, Width = 130 };
         btnExceptions.Click += (_, _) => { using var ex = new ExceptionsForm(); ex.ShowDialog(this); };
 
-        var link = new LinkLabel { Text = "github.com/rashn/RuSwitcher", Left = 156, Top = y + 4, AutoSize = true };
-        link.LinkClicked += (_, _) => OpenUrl("https://github.com/rashn/RuSwitcher");
-        y += 40;
+        var link = new LinkLabel { Text = "github.com/antonjas/NormalSwitcher", Left = 156, Top = y + 4, AutoSize = true };
+        link.LinkClicked += (_, _) => OpenUrl("https://github.com/antonjas/NormalSwitcher");
+        y += 32;
+        var credit = new Label { Text = L10n.T("settings.credit"), Left = 16, Top = y + 4, AutoSize = true };
+        y += 26;
 
         var btnClose = new Button { Text = L10n.T("settings.close"), Left = 294, Top = y, Width = 90, DialogResult = DialogResult.OK };
         AcceptButton = btnClose;
@@ -93,7 +95,7 @@ internal sealed class SettingsForm : Form
         Controls.AddRange(new Control[]
         {
             lblTrigger, cmbTrigger, chkWhole, chkSmart, chkAuto, chkSound, chkStart, chkPerApp,
-            chkUpdates, lblSwitch, cmbSwitch, btnExceptions, link, btnClose,
+            chkUpdates, lblSwitch, cmbSwitch, btnExceptions, link, credit, btnClose,
         });
     }
 

@@ -38,7 +38,7 @@ You can record a different shortcut in the same settings tab. Enable **Keep hist
 </p>
 
 <p align="center">
-  <sub>macOS app lives in <a href="macos/">macos/</a> · Windows version is <a href="windows/">planned</a> · cross-platform behaviour contract in <a href="shared/">shared/</a></sub>
+  <sub>macOS app lives in <a href="macos/">macos/</a> · Windows version is in <a href="windows/">preview</a> · cross-platform behaviour contract in <a href="shared/">shared/</a></sub>
 </p>
 
 <p align="center">

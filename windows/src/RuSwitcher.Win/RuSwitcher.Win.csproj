@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- RuSwitcher for Windows. No external (NuGet) dependencies. Low-level engine (LL hook,
+  <!-- NormalSwitcher for Windows. No external (NuGet) dependencies. Low-level engine (LL hook,
        SendInput injection, tray) is raw Win32 P/Invoke; WinForms (first-party .NET) is used
        only for the clipboard and the settings window. EnableWindowsTargeting lets it also
        compile on macOS (P/Invoke compiles, can't run) for a fast local compile-check; the real
@@ -9,7 +9,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <RootNamespace>RuSwitcher.Win</RootNamespace>
-    <AssemblyName>RuSwitcher</AssemblyName>
+    <AssemblyName>NormalSwitcher</AssemblyName>
+    <Product>NormalSwitcher</Product>
+    <Description>NormalSwitcher for Windows</Description>
+    <ApplicationIcon>NormalSwitcher.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -18,7 +21,7 @@
     <LangVersion>latest</LangVersion>
     <Platforms>x64;ARM64</Platforms>
     <!-- Windows track starts pre-1.0 (beta). Keep in sync with windows/version.json. -->
-    <Version>0.9.0</Version>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

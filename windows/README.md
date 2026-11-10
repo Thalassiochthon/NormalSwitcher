@@ -1,9 +1,13 @@
-# RuSwitcher for Windows
+# NormalSwitcher for Windows
 
-**Status: beta.** A tray application built on the same philosophy as the macOS original —
-zero external dependencies, no telemetry, local dictionaries, keycode-based conversion.
+**Status: preview 0.1.0.** A Windows tray application based on [RuSwitcher](https://github.com/rashn/RuSwitcher).
+The portable x64 build includes the .NET runtime. Extract the archive, run `NormalSwitcher.exe`,
+then use the tray icon for settings or to quit. Add both keyboard layouts in Windows and tap
+**Ctrl twice** to correct the last word or the selected text.
 
-## Features (parity with the macOS version)
+The dictionary checks run on your device. The preview leaves automatic update checks off by default.
+
+## Features
 
 - **Manual trigger** — double-tap Ctrl (default), double-tap Shift, or the Pause/Break key.
   Converts the last typed word, the current selection, or the whole line into the other layout,
@@ -13,8 +17,10 @@ zero external dependencies, no telemetry, local dictionaries, keycode-based conv
   gibberish (dictionary-driven).
 - **Trailing punctuation** kept literally (issue #15) — `ghbdtn,` → `привет,`.
 - **As-you-type auto conversion** (beta, off by default) — flips a word right after Space when the
-  dictionary is confident it was typed in the wrong layout. Precision over recall; reversing an
-  auto-conversion with the trigger teaches a "never convert" exception (learn-from-undo).
+  dictionary is confident it was typed in the wrong layout. This preview applies automatic edits only
+  to supported native text fields where the caret and original text can be verified. A later keypress
+  or mouse click cancels a pending edit. Reversing an auto-conversion teaches a "never convert"
+  exception.
 - **Exception lists** — never-convert / always-convert, editable in Settings → Exceptions.
 - **Layout-switch hotkey** (issue #14) — a separate hotkey that only switches the layout.
 - **Per-app layout memory** — remembers and restores each application's last-used layout.
@@ -59,6 +65,7 @@ P/Invoke code cannot *run* off Windows.
   the **macOS** feed and must stay where it is). The app checks it once a day and offers to open the
   download page.
 - **Installer:** [`installer/RuSwitcher.iss`](installer/RuSwitcher.iss) (Inno Setup, per-user).
-- **winget:** manifest templates in [`winget/`](winget/) — see its README for the submission steps.
+- **WinGet:** the checked-in manifests describe the upstream RuSwitcher package. NormalSwitcher
+  has no WinGet package in this preview.
 
 The Windows version is versioned **separately** from macOS (`win-vX.Y.Z`).

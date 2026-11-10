@@ -71,7 +71,8 @@ internal static class Converter
         string converted = convertedCore + suf;
         string original = originalCore + suf;
 
-        TextInjector.Replace(backspaces: coreCount + suf.Length, text: converted);
+        if (original.Length != coreCount + suf.Length || original == converted
+            || !TextInjector.Replace(backspaces: original.Length, text: converted)) return false;
         LayoutSwitcher.SwitchTo(targetHkl);
 
         _aText = converted; _aHkl = targetHkl;   // now on screen
@@ -85,6 +86,8 @@ internal static class Converter
     public static bool Reconvert()
     {
         if (_aText.Length == 0) return false;
+
+        if (!TextInjector.Replace(backspaces: _aText.Length, text: _bText)) return false;
 
         // Learn-from-undo: reversing an auto-conversion means the user rejected it — remember never to
         // auto-convert that typed word again (mirrors the macOS learn-from-undo).
@@ -100,7 +103,6 @@ internal static class Converter
             _lastWasAuto = false;   // only teach once
         }
 
-        TextInjector.Replace(backspaces: _aText.Length, text: _bText);
         LayoutSwitcher.SwitchTo(_bHkl);
 
         (_aText, _bText) = (_bText, _aText);   // toggle: a third trigger redoes the conversion

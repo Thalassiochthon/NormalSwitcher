@@ -11,7 +11,7 @@ namespace RuSwitcher.Win.Core;
 /// </summary>
 internal static class TextInjector
 {
-    public static void Replace(int backspaces, string text)
+    public static bool Replace(int backspaces, string text)
     {
         var inputs = new List<INPUT>(backspaces * 2 + text.Length * 2);
 
@@ -27,7 +27,7 @@ internal static class TextInjector
         }
 
         var arr = inputs.ToArray();
-        SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+        return SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>()) == arr.Length;
     }
 
     /// <summary>Send Ctrl+<paramref name="vk"/> (e.g. Ctrl+C / Ctrl+V).</summary>

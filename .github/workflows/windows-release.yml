@@ -89,7 +89,7 @@ jobs:
                  Where-Object { $_.Name -match '^\d+\.\d+\.\d+' } |
                  Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
           $signtool = Join-Path $sdk.FullName "x64\signtool.exe"
-          foreach ($exe in @("publish\x64\RuSwitcher.exe","publish\arm64\RuSwitcher.exe")) {
+          foreach ($exe in @("publish\x64\NormalSwitcher.exe","publish\arm64\NormalSwitcher.exe")) {
             & $signtool sign /f "${{ steps.cert.outputs.pfx }}" /p "$env:CERT_PW" `
               /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $exe
           }
@@ -106,7 +106,7 @@ jobs:
           # SourceExe MUST be absolute: ISCC resolves relative [Files] Source paths against the .iss
           # file's own directory (windows\installer), not the workflow working directory.
           & $iscc "/DMyAppVersion=${{ steps.ver.outputs.version }}" `
-                  "/DSourceExe=${{ github.workspace }}\publish\x64\RuSwitcher.exe" `
+                  "/DSourceExe=${{ github.workspace }}\publish\x64\NormalSwitcher.exe" `
                   windows\installer\RuSwitcher.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
           # ISCC writes to windows\installer\dist\
@@ -133,8 +133,8 @@ jobs:
         run: |
           $v = '${{ steps.ver.outputs.version }}'
           New-Item -ItemType Directory -Force -Path assets | Out-Null
-          Copy-Item publish\x64\RuSwitcher.exe   "assets\RuSwitcher-$v-win-x64.exe"
-          Copy-Item publish\arm64\RuSwitcher.exe "assets\RuSwitcher-$v-win-arm64.exe"
+          Copy-Item publish\x64\NormalSwitcher.exe   "assets\NormalSwitcher-$v-win-x64.exe"
+          Copy-Item publish\arm64\NormalSwitcher.exe "assets\NormalSwitcher-$v-win-arm64.exe"
           if (-not (Test-Path windows\installer\dist\*.exe)) { throw 'installer was not built' }
           Copy-Item windows\installer\dist\*.exe assets\
           $lines = @()
@@ -151,13 +151,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = '${{ steps.ver.outputs.version }}'
-          $notes = "RuSwitcher for Windows $v`n`nAssets: portable single-file exe (x64/arm64) and an installer.`n`nSHA256:`n" + (Get-Content assets\SHA256SUMS.txt -Raw)
+          $notes = "NormalSwitcher for Windows $v`n`nAssets: portable single-file exe (x64/arm64) and an installer.`n`nSHA256:`n" + (Get-Content assets\SHA256SUMS.txt -Raw)
           $notes | Out-File -Encoding utf8 notes.md
           # Build the arg list explicitly: an empty '$pre' would otherwise reach gh as an empty
           # positional (a bogus asset path) and fail the first stable release. --target pins the tag to
           # the built commit (matters on the workflow_dispatch path, which creates the tag).
           $ghArgs = @("win-v$v") + (Get-ChildItem assets\* | ForEach-Object { $_.FullName }) +
-                    @('--title', "RuSwitcher for Windows $v", '--notes-file', 'notes.md',
+                    @('--title', "NormalSwitcher for Windows $v", '--notes-file', 'notes.md',
                       '--target', '${{ github.sha }}')
           if ('${{ steps.ver.outputs.prerelease }}' -eq 'true') { $ghArgs += '--prerelease' }
           gh release create @ghArgs

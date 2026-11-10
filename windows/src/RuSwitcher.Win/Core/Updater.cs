@@ -15,7 +15,9 @@ namespace RuSwitcher.Win.Core;
 /// </summary>
 internal static class Updater
 {
-    private const string FeedUrl = "https://raw.githubusercontent.com/rashn/RuSwitcher/main/windows/version.json";
+    private const string FeedUrl = "https://raw.githubusercontent.com/antonjas/NormalSwitcher/windows-preview/windows/version.json";
+
+    private const string ReleaseUrl = "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v";
 
     // Single-flight: repeated tray clicks / an overlapping launch check must not spawn concurrent
     // HTTP checks that each write Settings and stack message boxes.
@@ -69,7 +71,7 @@ internal static class Updater
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                http.DefaultRequestHeaders.UserAgent.ParseAdd("RuSwitcher-Win-Updater");
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("NormalSwitcher-Win-Updater");
                 string json = await http.GetStringAsync(FeedUrl);
                 feed = JsonSerializer.Deserialize<Feed>(json);
             }
@@ -81,13 +83,18 @@ internal static class Updater
                 return;
             }
 
-            if (feed == null || string.IsNullOrWhiteSpace(feed.version)) return;
+            if (feed == null || !Version.TryParse(feed.version, out var latest)
+                || !string.Equals(feed.url, ReleaseUrl + feed.version, StringComparison.Ordinal))
+            {
+                if (!silent) ui.Post(_ => MessageBox.Show(
+                    L10n.T("upd.uptodate", Current.ToString(3)),
+                    L10n.T("app.name"), MessageBoxButtons.OK, MessageBoxIcon.Information), null);
+                return;
+            }
 
             // All Settings mutation happens on the UI (message-loop) thread — never race the
             // hook/tray/winevent writers from this background task.
             ui.Post(_ => { Settings.Current.LastUpdateCheckTicks = DateTime.UtcNow.Ticks; Settings.Current.Save(); }, null);
-
-            if (!Version.TryParse(feed.version, out var latest)) return;
 
             if (latest > Current)
             {
@@ -114,9 +121,7 @@ internal static class Updater
             MessageBoxButtons.YesNo, MessageBoxIcon.Information);
         if (r == DialogResult.Yes)
         {
-            string open = string.IsNullOrWhiteSpace(feed.url)
-                ? "https://github.com/rashn/RuSwitcher/releases/latest" : feed.url;
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(open) { UseShellExecute = true }); }
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(feed.url) { UseShellExecute = true }); }
             catch { /* ignore */ }
         }
         else
