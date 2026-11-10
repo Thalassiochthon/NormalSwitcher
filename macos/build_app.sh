@@ -60,6 +60,9 @@ echo "→ Stamped Info.plist: CFBundleShortVersionString=$SHORT_VERSION$DEV_TAG 
 # 5. Include the upstream MIT license in the signed bundle.
 cp "$PROJECT_DIR/../LICENSE" "$APP_BUNDLE/Contents/Resources/LICENSE"
 cp "$PROJECT_DIR/NormalSwitcher.icns" "$APP_BUNDLE/Contents/Resources/NormalSwitcher.icns"
+mkdir -p "$APP_BUNDLE/Contents/Resources/LayoutSounds"
+cp "$PROJECT_DIR/../shared/layout-sounds/"*.wav "$APP_BUNDLE/Contents/Resources/LayoutSounds/"
+cp "$PROJECT_DIR/../shared/layout-sounds/README.md" "$APP_BUNDLE/Contents/Resources/LayoutSounds/"
 
 # 6. Создаём PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"

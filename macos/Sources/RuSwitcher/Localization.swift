@@ -39,7 +39,7 @@ enum L10n {
     static var settingsOpenClipboardHistory: String { s("settings.clipboardHistory.open") }
     static var settingsClipboardHistoryLimit: String { s("settings.clipboardHistory.hint") }
     static var settingsGroupAppearance: String { s("settings.group.appearance") }
-    static var settingsLayoutSoundDefault: String { s("settings.layoutSound.default") }
+    static func settingsLayoutSoundName(_ id: String) -> String { s("settings.layoutSound." + id) }
     static var settingsLayoutSoundPreview: String { s("settings.layoutSound.preview") }
     static var settingsLayoutSoundHint: String { s("settings.layoutSound.hint") }
     static var settingsGroupManual: String { s("settings.group.manual") }
@@ -281,7 +281,15 @@ enum L10n {
             "settings.clipboardHistory.open": "Open Clipboard History",
             "settings.group.appearance": "Menu Bar and Indicators",
             "settings.layoutSound.hint": "Plays a sound on the first keystroke after the layout changes.",
-            "settings.layoutSound.default": "Default (varies by layout)",
+            "settings.layoutSound.automatic": "By layout (Tap / Soft)",
+            "settings.layoutSound.tap": "Tap",
+            "settings.layoutSound.double": "Double tap",
+            "settings.layoutSound.wood": "Wood",
+            "settings.layoutSound.drop": "Drop",
+            "settings.layoutSound.rise": "Rise",
+            "settings.layoutSound.glass": "Glass",
+            "settings.layoutSound.soft": "Soft",
+            "settings.layoutSound.pulse": "Pulse",
             "settings.layoutSound.preview": "Play Preview",
             "settings.group.manual": "Manual Correction",
             "settings.group.diagnostics": "Diagnostics",
@@ -485,7 +493,15 @@ enum L10n {
             "settings.clipboardHistory.open": "Открыть историю буфера",
             "settings.group.appearance": "Строка меню и индикаторы",
             "settings.layoutSound.hint": "Звук воспроизводится при вводе первой буквы после смены раскладки.",
-            "settings.layoutSound.default": "По умолчанию (зависит от раскладки)",
+            "settings.layoutSound.automatic": "По раскладке (Тык / Мягкий)",
+            "settings.layoutSound.tap": "Тык",
+            "settings.layoutSound.double": "Тык-тык",
+            "settings.layoutSound.wood": "Дерево",
+            "settings.layoutSound.drop": "Капля",
+            "settings.layoutSound.rise": "Взлёт",
+            "settings.layoutSound.glass": "Стекло",
+            "settings.layoutSound.soft": "Мягкий",
+            "settings.layoutSound.pulse": "Пульс",
             "settings.layoutSound.preview": "Прослушать",
             "settings.group.manual": "Ручное исправление",
             "settings.group.diagnostics": "Диагностика",

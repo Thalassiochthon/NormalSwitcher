@@ -432,7 +432,7 @@ final class SettingsManager: @unchecked Sendable {
     }
 
     var layoutSound: LayoutSound {
-        get { LayoutSound(rawValue: defaults.string(forKey: Keys.layoutSound) ?? "") ?? .automatic }
+        get { LayoutSound(savedValue: defaults.string(forKey: Keys.layoutSound)) }
         set { defaults.set(newValue.rawValue, forKey: Keys.layoutSound) }
     }
 

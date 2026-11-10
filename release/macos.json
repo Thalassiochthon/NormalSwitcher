@@ -1,10 +1,10 @@
 {
-  "version": "1.1.5",
-  "build": "75",
+  "version": "1.1.6",
+  "build": "76",
   "manual_migration": false,
-  "notes": "В быстром меню буфера обмена теперь восемь последних записей. Пункт «Вся история…» открывает полный список с поиском.\n\nThe clipboard menu now shows the eight most recent entries. All History opens the full, searchable list.\n",
-  "zip_sha256": "ddd33816c84f6e5c427ca5db361fd37b0fca019c4b150aa56b02a777c81f11c2",
+  "notes": "Восемь коротких звуков NormalSwitcher для смены раскладки и предпрослушивания. Звучание не зависит от системной звуковой схемы.\n\nEight short NormalSwitcher layout cues for switching and preview, independent of the system sound scheme.\n",
+  "zip_sha256": "761057950d90f7347682eb1cc0c74d16c325297b6e8f27aec6f30d874f280a57",
   "blobs": [
-    "d92e1caa3c4b088438646833991863cab667954c"
+    "f68482c5bfb68dbb24e96d8bc808547b6f6de80b"
   ]
 }
