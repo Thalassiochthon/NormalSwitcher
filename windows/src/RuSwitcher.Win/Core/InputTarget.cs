@@ -24,11 +24,13 @@ internal readonly record struct InputTarget(IntPtr Foreground, IntPtr Focus, Int
     public bool IsPasswordEdit =>
         IsNativeEdit() && (GetWindowLongW(Focus, GWL_STYLE) & ES_PASSWORD) != 0;
 
+    internal bool IsWritableNativeEdit =>
+        IsNativeEdit() && (GetWindowLongW(Focus, GWL_STYLE) & (ES_PASSWORD | ES_READONLY)) == 0;
+
     /// <summary>Automatic editing requires a verifiable caret and exact suffix in a plain Win32 edit.</summary>
     public bool HasPlainTextAtCaret(string suffix)
     {
-        if (!IsNativeEdit() || (GetWindowLongW(Focus, GWL_STYLE) & (ES_PASSWORD | ES_READONLY)) != 0)
-            return false;
+        if (!IsWritableNativeEdit) return false;
         if (SendMessageTimeoutW(Focus, EM_GETSEL, IntPtr.Zero, IntPtr.Zero,
                 SMTO_ABORTIFHUNG, 20, out var selection) == IntPtr.Zero)
             return false;

@@ -55,10 +55,8 @@ internal sealed class TrayIcon : IDisposable
 
     /// <summary>Called from the LL hook callback on a word boundary when auto-convert is armed: posts a
     /// message so the dictionary check + retype run on the message loop, never inside the callback.</summary>
-    public void PostAutoConvert()
-    {
-        if (_hwnd != IntPtr.Zero) PostMessageW(_hwnd, WM_AUTOCONVERT, IntPtr.Zero, IntPtr.Zero);
-    }
+    public bool PostAutoConvert() =>
+        _hwnd != IntPtr.Zero && PostMessageW(_hwnd, WM_AUTOCONVERT, IntPtr.Zero, IntPtr.Zero) != IntPtr.Zero;
 
     public void Show(string tooltip)
     {

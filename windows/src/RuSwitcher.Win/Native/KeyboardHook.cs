@@ -20,7 +20,8 @@ internal sealed class KeyboardHook : IDisposable
     public event Action? MousePressed;
 
     /// <summary>(vkCode, scanCode) of a real key press.</summary>
-    public event Action<uint, uint>? KeyDown;
+    public Func<uint, uint, bool>? KeyDown;
+    private readonly HashSet<uint> _suppressed = [];
 
     /// <summary>(vkCode, scanCode) of a real key release — needed for modifier double-tap.</summary>
     public event Action<uint, uint>? KeyUp;
@@ -58,13 +59,23 @@ internal sealed class KeyboardHook : IDisposable
                 var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
                 // Ignore our own injected retype events (self-event marker).
                 if (data.dwExtraInfo != InjectedMarker)
-                    KeyDown?.Invoke(data.vkCode, data.scanCode);
+                {
+                    if (KeyDown?.Invoke(data.vkCode, data.scanCode) == true)
+                    {
+                        _suppressed.Add(data.vkCode);
+                        return (IntPtr)1;
+                    }
+                    _suppressed.Remove(data.vkCode);
+                }
             }
             else if (msg == WM_KEYUP || msg == WM_SYSKEYUP)
             {
                 var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
                 if (data.dwExtraInfo != InjectedMarker)
+                {
+                    if (_suppressed.Remove(data.vkCode)) return (IntPtr)1;
                     KeyUp?.Invoke(data.vkCode, data.scanCode);
+                }
             }
         }
         return CallNextHookEx(_hook, nCode, wParam, lParam);

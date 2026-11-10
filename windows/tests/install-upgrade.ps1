@@ -61,7 +61,17 @@ try {
     }
 
     New-Item -ItemType Directory -Force $settingsDir | Out-Null
-    '{"ConvertWholeLine":true,"CheckUpdatesEnabled":true,"UiLanguage":"en"}' | Set-Content -Encoding ascii $settingsPath
+    @{
+        ConvertWholeLine = $true
+        CheckUpdatesEnabled = $true
+        UiLanguage = 'en'
+        WordEndOnEnter = $true
+        WordEndOnTab = $true
+        Abbreviations = @{ zz = 'NormalSwitcher' }
+        ClipboardHistoryEnabled = $true
+        ClipboardHistoryPersistent = $true
+        GlobalShortcuts = @{ ChangeCase = @{ Key = 119; Modifiers = 6 } }
+    } | ConvertTo-Json -Depth 5 | Set-Content -Encoding ascii $settingsPath
     $running = Start-Process -FilePath $exe -PassThru
     Wait-ForWindow 'NormalSwitcherTrayWindow' 'NormalSwitcher' | Out-Null
     $prompt = Wait-ForWindow '#32770' 'NormalSwitcher — Update available'
@@ -88,6 +98,7 @@ try {
     $settingsWindow = Wait-ForWindow $null 'NormalSwitcher — Settings'
     [NormalSwitcherSmoke]::PostMessage($settingsWindow, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
     Write-Host 'Update prompt, download, installer handoff, restart, settings preservation and reopening Settings verified.'
+    dotnet run --project windows/tests/NativeInputSmoke/NativeInputSmoke.csproj -c Release
 }
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }

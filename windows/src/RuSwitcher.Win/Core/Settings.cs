@@ -42,6 +42,8 @@ public sealed class Settings
     public bool FixTypos { get; set; }
     public bool ExtendedDictionary { get; set; }
     public bool WordEndOnSpace { get; set; } = true;
+    public bool WordEndOnEnter { get; set; }
+    public bool WordEndOnTab { get; set; }
     public Dictionary<string, string> Abbreviations { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<ShortcutAction, KeyChord> GlobalShortcuts { get; set; } = new();
     public bool KeyboardEnabled { get; set; } = true;

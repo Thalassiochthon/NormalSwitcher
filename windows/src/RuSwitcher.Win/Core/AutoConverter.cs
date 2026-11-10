@@ -17,7 +17,7 @@ internal static class AutoConverter
     /// converted word followed by a space. Deferring off the hook thread keeps the callback O(1) and
     /// avoids the LowLevelHooksTimeout / silent-unhook trap (COM + SendInput must not run in-callback).
     /// Returns true if it converted; on "keep" it does nothing (the word + space stay as typed).</summary>
-    public static bool TryConvertWord(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent)
+    public static bool TryConvertWord(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ")
     {
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
         if (Settings.Current.ExcludedApps.Count > 0
@@ -77,12 +77,12 @@ internal static class AutoConverter
 
         bool Replace(string replacement, IntPtr layout, bool learn)
         {
-            if (replacement == typed || !stillCurrent() || !input.HasPlainTextAtCaret(typed + " ")
-                || !stillCurrent() || !TextInjector.Replace(backspaces: keys.Count + 1, text: replacement + " "))
+            if (replacement == typed || !stillCurrent() || !input.HasPlainTextAtCaret(typed + suffix)
+                || !stillCurrent() || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
                 return false;
 
             if (layout != sourceHkl) LayoutSwitcher.SwitchTo(layout);
-            Converter.NoteAutoConversion(replacement + " ", typed + " ", layout, sourceHkl, learn);
+            Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, sourceHkl, learn);
             return true;
         }
     }

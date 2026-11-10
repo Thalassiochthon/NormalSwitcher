@@ -46,12 +46,13 @@ internal static class Program
         bool enabled = settings.KeyboardEnabled;
         long inputGeneration = 0;
         InputTarget? wordTarget = null, undoTarget = null;
-        (List<TypedKey> Keys, InputTarget Target, long Generation)? pendingAuto = null;
+        (List<TypedKey> Keys, InputTarget Target, long Generation, uint DeferredKey)? pendingAuto = null;
         (InputTarget Target, long Generation)? pendingTrigger = null;
 
         void ResetInput()
         {
             inputGeneration++;
+            ReplayBoundary();
             pendingAuto = null;
             pendingTrigger = null;
             buffer.Reset();
@@ -127,16 +128,41 @@ internal static class Program
             if (acted) undoTarget = trigger.Target;
             Log($"trigger: acted={acted}");
         };
-        tray.AutoConvertActivated += () =>
+        void ReplayBoundary()
         {
-            // Deferred off the hook callback: the real Space has already landed, so TryConvertWord
-            // deletes the word + that space and re-types the converted word + space (or keeps it).
+            if (pendingAuto is not { DeferredKey: not 0 } pending) return;
+            pendingAuto = null;
+            Replay(pending.DeferredKey, pending.Target);
+        }
+
+        static void Replay(uint key, InputTarget target)
+        {
+            if (InputTarget.Capture() is { } current && target.SameControl(current))
+                TextInjector.SendKey((ushort)key);
+        }
+
+        tray.AutoConvertActivated += async () =>
+        {
             var request = pendingAuto;
             pendingAuto = null;
             if (request is not { } word) return;
-            if (AutoConverter.TryConvertWord(word.Keys, word.Target,
-                    () => settings.HasAutomaticEdits && CanEdit(word.Target, word.Generation, checkLayout: true)))
-                undoTarget = word.Target;
+            bool deferred = word.DeferredKey != 0;
+            if (!deferred) await Task.Delay(12); // Let the target handle the Space before checking its text.
+            try
+            {
+                if (AutoConverter.TryConvertWord(word.Keys, word.Target,
+                        () => settings.HasAutomaticEdits && CanEdit(word.Target, word.Generation, checkLayout: true),
+                        deferred ? "" : " "))
+                    undoTarget = word.Target;
+            }
+            finally
+            {
+                if (deferred)
+                {
+                    Converter.ClearReconvert();
+                    Replay(word.DeferredKey, word.Target);
+                }
+            }
         };
         tray.EnabledChanged += on => { enabled = on; ResetInput(); Log($"enabled = {on}"); };
         UI.SettingsForm? currentSettings = null;
@@ -200,9 +226,10 @@ internal static class Program
 
         using var hook = new KeyboardHook();
         hook.MousePressed += () => { tray.Shortcuts.CancelPending(); ResetInput(); };
-        hook.KeyDown += (vk, sc) =>
+        hook.KeyDown = (vk, sc) =>
         {
-            if (!enabled) return;
+            if (!enabled) return false;
+            ReplayBoundary();
             inputGeneration++;
             pendingAuto = null;
 
@@ -210,14 +237,14 @@ internal static class Program
             switchDetector.OnKeyDown(vk);
             if (vk is VK_LCONTROL or VK_RCONTROL or VK_LSHIFT or VK_RSHIFT or VK_PAUSE
                 or 0xA4 or 0xA5 or 0x5B or 0x5C || tray.Shortcuts.IsRegisteredPress(vk))
-                return;
+                return false;
 
             tray.Shortcuts.CancelPending();
             Converter.ClearReconvert();
             if (ShortcutHeld() || InputTarget.Capture() is not { } target || target.IsPasswordEdit)
             {
                 ResetInput();
-                return;
+                return false;
             }
             if (wordTarget != target)
             {
@@ -225,10 +252,17 @@ internal static class Program
                 wordTarget = target;
             }
 
-            if (vk == KeystrokeBuffer.VK_SPACE && settings.WordEndOnSpace && settings.HasAutomaticEdits && !buffer.IsEmpty)
+            uint deferredKey = 0;
+            if (!buffer.IsEmpty && settings.HasAutomaticEdits && !IsDown(VK_SHIFT))
             {
-                pendingAuto = (new List<TypedKey>(buffer.CurrentWord), target, inputGeneration);
-                tray.PostAutoConvert();
+                bool space = vk == KeystrokeBuffer.VK_SPACE && settings.WordEndOnSpace;
+                bool deferred = (vk == KeystrokeBuffer.VK_RETURN && settings.WordEndOnEnter
+                    || vk == KeystrokeBuffer.VK_TAB && settings.WordEndOnTab) && target.IsWritableNativeEdit;
+                if ((space || deferred) && tray.PostAutoConvert())
+                {
+                    deferredKey = deferred ? vk : 0;
+                    pendingAuto = (new List<TypedKey>(buffer.CurrentWord), target, inputGeneration, deferredKey);
+                }
             }
             if (KeystrokeBuffer.IsTypingKey(vk))
             {
@@ -236,10 +270,8 @@ internal static class Program
                 bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
                 buffer.Append(new TypedKey(vk, sc, shift, caps));
             }
-            else
-            {
-                buffer.Reset();
-            }
+            else buffer.Reset();
+            return deferredKey != 0;
         };
         hook.KeyUp += (vk, sc) =>
         {

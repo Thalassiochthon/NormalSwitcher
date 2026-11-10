@@ -72,6 +72,8 @@ internal sealed class SettingsForm : Form
         AddPage("automatic",
             Check("settings.auto", s.AutoConvert, value => { s.AutoConvert = value; s.Save(); }),
             Check("settings.wordEnd.space", s.WordEndOnSpace, value => { s.WordEndOnSpace = value; s.Save(); }),
+            Check("settings.wordEnd.enter", s.WordEndOnEnter, value => { s.WordEndOnEnter = value; s.Save(); }),
+            Check("settings.wordEnd.tab", s.WordEndOnTab, value => { s.WordEndOnTab = value; s.Save(); }),
             Check("settings.fixCaps", s.FixTwoCaps, value => { s.FixTwoCaps = value; s.Save(); }),
             Check("settings.fixTypos", s.FixTypos, value => { s.FixTypos = value; s.Save(); }),
             Check("settings.frequencyWords", s.ExtendedDictionary, value => { s.ExtendedDictionary = value; s.Save(); }),
