@@ -102,6 +102,8 @@ def main():
     if release["draft"]:
         release = request(f"/releases/{release['id']}", "PATCH",
                           {"draft": False, "prerelease": True, "make_latest": "false"})
+    # Draft assets have an untagged URL; use the URL returned after publication.
+    asset = next(x for x in release["assets"] if x["name"] == args.asset.name)
     feed = {**manifest, "url": release["html_url"], "sha256": digest, "source_commit": commit}
     beta = request("/contents/version-beta.json?ref=personal")
     content = json.dumps(feed, ensure_ascii=False, indent=2) + "\n"

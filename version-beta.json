@@ -1,0 +1,9 @@
+{
+  "version": "1.2.0a",
+  "build": "77",
+  "dev": "",
+  "notes": "Бета 1.2.0 — задачи из буфера обмена, компактная история с поиском, шифрование истории и понятный статус автоисправления.\n\nЗадачи: Control+Shift+T. Сохранить текст буфера в задачу: Control+Option+Shift+V. История: Control+Shift+V. Сочетания меняются в настройках.\n\nЭто тестовый выпуск для добровольной проверки. Проверьте создание и сохранение задач, вставку в нужное окно, горячие клавиши и работу после перезапуска.\n\nBeta 1.2.0: clipboard tasks, compact searchable history, encrypted clipboard persistence and automatic-correction status. Configurable shortcuts; please test capture, paste focus and persistence after restart.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0a",
+  "sha256": "8eab9c0ae2a09bc3d93d0512a8d90c12c7d72529d9798a6f029a2e4867efd6eb",
+  "source_commit": "6e98fd3e71b62b9153c1b624095186ff4bf9d981"
+}

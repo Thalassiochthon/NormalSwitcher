@@ -28,9 +28,12 @@ the selected layouts and dictionaries; ambiguous words can be left unchanged.
 слово или выделение. Можно включить автоматическое исправление. Проверка слов
 выполняется на устройстве; результат зависит от раскладок и доступных словарей.
 
-## In development: clipboard tasks for macOS
+## macOS beta: clipboard tasks
 
-**These changes are in the task development branch, not yet in a published release.**
+**Available in [1.2.0a beta](https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0a).**
+Enable **Settings → About → Get beta versions**, then check for updates.
+Users with beta updates disabled continue to receive stable releases only.
+[Beta publication and promotion process](release/BETA.md).
 
 | Action | Default shortcut |
 | --- | --- |
@@ -59,7 +62,9 @@ independently. Tasks remain available from the menu and settings.
 
 ### По-русски
 
-Новые возможности пока находятся в ветке разработки, **обновление ещё не выпущено**.
+Новые возможности доступны в [бете 1.2.0a](https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0a).
+Включите «Настройки → О программе → Получать бета-версии», затем проверьте обновления.
+Без этой галочки программа получает только стабильные выпуски.
 
 Откройте историю буфера через **Control + Shift + V**, выберите запись и нажмите
 **«В задачи»**. **Control + Option + Shift + V** сразу сохраняет текущий текст буфера
