@@ -150,7 +150,7 @@ internal static class Program
             if (!deferred) await Task.Delay(12); // Let the target handle the Space before checking its text.
             try
             {
-                if (AutoConverter.TryConvertWord(word.Keys, word.Target,
+                if (await AutoConverter.TryConvertWordAsync(word.Keys, word.Target,
                         () => settings.HasAutomaticEdits && CanEdit(word.Target, word.Generation, checkLayout: true),
                         deferred ? "" : " "))
                     undoTarget = word.Target;

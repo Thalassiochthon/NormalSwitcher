@@ -120,7 +120,8 @@ internal static class Converter
         IntPtr sourceHkl = LayoutSwitcher.Current();
         if (LayoutSwitcher.Opposite() is not { } targetHkl) return false;
 
-        return TransformSelection(sel => smart ? SmartConvert.Selection(sel, sourceHkl, targetHkl)
+        return TransformSelection(sel => Settings.Current.ConvertByText ? KeyMapper.ConvertByText(sel, sourceHkl, targetHkl)
+            : smart ? SmartConvert.Selection(sel, sourceHkl, targetHkl)
             : KeyMapper.ConvertText(sel, sourceHkl, targetHkl));
     }
 

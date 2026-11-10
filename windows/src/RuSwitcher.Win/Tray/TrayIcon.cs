@@ -156,6 +156,16 @@ internal sealed class TrayIcon : IDisposable
         TriggerKind.CtrlDoubleTap => L10n.T("trigger.ctrl"),
         TriggerKind.ShiftDoubleTap => L10n.T("trigger.shift"),
         TriggerKind.PauseBreak => L10n.T("trigger.pause"),
+        TriggerKind.AltDoubleTap => L10n.T("trigger.double", "Alt"),
+        TriggerKind.LeftCtrlDoubleTap => L10n.T("trigger.doubleLeft", "Ctrl"),
+        TriggerKind.RightCtrlDoubleTap => L10n.T("trigger.doubleRight", "Ctrl"),
+        TriggerKind.LeftShiftDoubleTap => L10n.T("trigger.doubleLeft", "Shift"),
+        TriggerKind.RightShiftDoubleTap => L10n.T("trigger.doubleRight", "Shift"),
+        TriggerKind.LeftAltDoubleTap => L10n.T("trigger.doubleLeft", "Alt"),
+        TriggerKind.RightAltDoubleTap => L10n.T("trigger.doubleRight", "Alt"),
+        TriggerKind.CtrlTap => L10n.T("trigger.tap", "Ctrl"),
+        TriggerKind.ShiftTap => L10n.T("trigger.tap", "Shift"),
+        TriggerKind.AltTap => L10n.T("trigger.tap", "Alt"),
         _ => "?",
     };
 

@@ -24,6 +24,9 @@ internal readonly record struct InputTarget(IntPtr Foreground, IntPtr Focus, Int
     public bool IsPasswordEdit =>
         IsNativeEdit() && (GetWindowLongW(Focus, GWL_STYLE) & ES_PASSWORD) != 0;
 
+    internal Task<bool> MatchesTextAtCaretAsync(string suffix) =>
+        IsNativeEdit() ? Task.FromResult(HasPlainTextAtCaret(suffix)) : AccessibleText.MatchesAtCaretAsync(this, suffix);
+
     internal bool IsWritableNativeEdit =>
         IsNativeEdit() && (GetWindowLongW(Focus, GWL_STYLE) & (ES_PASSWORD | ES_READONLY)) == 0;
 

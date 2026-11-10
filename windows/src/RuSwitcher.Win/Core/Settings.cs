@@ -10,6 +10,16 @@ public enum TriggerKind
     CtrlDoubleTap = 0,   // двойной тап Ctrl (по умолчанию)
     ShiftDoubleTap = 1,  // двойной тап Shift
     PauseBreak = 2,      // выделенная клавиша Pause/Break
+    AltDoubleTap = 3,
+    LeftCtrlDoubleTap = 4,
+    RightCtrlDoubleTap = 5,
+    LeftShiftDoubleTap = 6,
+    RightShiftDoubleTap = 7,
+    LeftAltDoubleTap = 8,
+    RightAltDoubleTap = 9,
+    CtrlTap = 10,
+    ShiftTap = 11,
+    AltTap = 12,
 }
 
 /// <summary>Настройки Windows-версии: JSON в %LocalAppData%\NormalSwitcher\settings.json.</summary>
@@ -23,6 +33,7 @@ public sealed class Settings
     /// <summary>issue #22: smart per-word selection conversion (keep valid words). Default on;
     /// off = plain one-way flip.</summary>
     public bool SmartConversion { get; set; } = true;
+    public bool ConvertByText { get; set; }
 
     /// <summary>issue #7: play a sound when the layout switches. Default off.</summary>
     public bool SoundOnSwitch { get; set; } = false;

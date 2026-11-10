@@ -62,6 +62,33 @@ internal static class Program
             finally { form.Close(); }
         };
         Application.Run(form);
+        return result == 0 ? CheckAccessibleEditor() : result;
+    }
+
+    private static int CheckAccessibleEditor()
+    {
+        var text = new System.Windows.Controls.TextBox();
+        var window = new System.Windows.Window { Title = "NormalSwitcher UI Automation test", Topmost = true, Content = text };
+        int result = 1;
+        window.ContentRendered += async (_, _) =>
+        {
+            try
+            {
+                window.Activate();
+                text.Focus();
+                await Until(() => text.IsKeyboardFocused, "UI Automation fixture focus");
+                TypeShortcutWord();
+                await Task.Delay(50);
+                Tap(0x20);
+                await Until(() => text.Text == "NormalSwitcher ", "Space expansion through UI Automation");
+                Console.WriteLine("UI Automation verified the text in a WPF editor.");
+                result = 0;
+            }
+            catch (Exception error) { Console.Error.WriteLine(error); }
+            finally { window.Close(); }
+        };
+        var app = new System.Windows.Application();
+        app.Run(window);
         return result;
     }
 

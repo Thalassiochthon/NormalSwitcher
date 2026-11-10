@@ -17,7 +17,7 @@ internal static class AutoConverter
     /// converted word followed by a space. Deferring off the hook thread keeps the callback O(1) and
     /// avoids the LowLevelHooksTimeout / silent-unhook trap (COM + SendInput must not run in-callback).
     /// Returns true if it converted; on "keep" it does nothing (the word + space stay as typed).</summary>
-    public static bool TryConvertWord(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ")
+    public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ")
     {
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
         if (Settings.Current.ExcludedApps.Count > 0
@@ -34,7 +34,7 @@ internal static class AutoConverter
         var settings = Settings.Current;
         string lower = typed.ToLowerInvariant();
         if (settings.Abbreviations.TryGetValue(lower, out string? expansion) && !string.IsNullOrEmpty(expansion))
-            return Replace(expansion, sourceHkl, learn: false);
+            return await Replace(expansion, sourceHkl, learn: false);
         if (settings.NeverConvert.Contains(lower)) return false;
 
         var targets = LayoutSwitcher.ConversionTargets(sourceHkl).ToArray();
@@ -57,27 +57,27 @@ internal static class AutoConverter
                     : candidate;
             }
         }
-        if (converted != null) return Replace(converted, targetHkl, learn: true);
+        if (converted != null) return await Replace(converted, targetHkl, learn: true);
 
         if (settings.FixTypos && targets.Length == 1 &&
             TextFixes.Number(keys, typed, key => KeyMapper.TranslateIn(key, targets[0])) is { } number)
-            return Replace(number, sourceHkl, learn: true);
+            return await Replace(number, sourceHkl, learn: true);
 
         if (IsHebrew(srcTag)) return false;
         if (settings.FixTwoCaps && !caps &&
             TextFixes.TwoCaps(typed, word => Dict.CheckWord(word, srcTag) == true) is { } casing)
-            return Replace(casing, sourceHkl, learn: false);
+            return await Replace(casing, sourceHkl, learn: false);
         if (settings.FixTypos && TextFixes.Typo(keys, typed, key => KeyMapper.TranslateIn(key, sourceHkl),
                 word => CheckTarget(word, srcTag), word => CheckTarget(word, srcTag) == true) is { } typo)
-            return Replace(typo, sourceHkl, learn: true);
+            return await Replace(typo, sourceHkl, learn: true);
         return false;
 
         bool? CheckTarget(string word, string tag) =>
             settings.ExtendedDictionary && FrequencyWords.Contains(word, tag) ? true : Dict.CheckWord(word, tag);
 
-        bool Replace(string replacement, IntPtr layout, bool learn)
+        async Task<bool> Replace(string replacement, IntPtr layout, bool learn)
         {
-            if (replacement == typed || !stillCurrent() || !input.HasPlainTextAtCaret(typed + suffix)
+            if (replacement == typed || !stillCurrent() || !await input.MatchesTextAtCaretAsync(typed + suffix)
                 || !stillCurrent() || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
                 return false;
 

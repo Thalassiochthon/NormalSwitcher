@@ -89,6 +89,14 @@ internal static class KeyMapper
             map[sch] = tch;
     }
 
+    public static string ConvertByText(string text, IntPtr first, IntPtr second)
+    {
+        // A letter shared by both layouts uses the direction of the currently active one.
+        var map = BuildPairMap(first, second);
+        foreach (var (letter, replacement) in BuildPairMap(second, first)) map.TryAdd(letter, replacement);
+        return new string(text.Select(letter => map.TryGetValue(letter, out var value) ? value : letter).ToArray());
+    }
+
     /// <summary>Convert arbitrary text from the source layout to the target layout (char by char).</summary>
     public static string ConvertText(string text, IntPtr sourceHkl, IntPtr targetHkl)
     {
