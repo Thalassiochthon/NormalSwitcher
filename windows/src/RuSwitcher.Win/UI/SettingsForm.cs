@@ -82,6 +82,10 @@ internal sealed class SettingsForm : Form
             Check("tray.enable", s.KeyboardEnabled, value => KeyboardEnabledChanged?.Invoke(value)),
             Check("settings.startup", AutoStart.IsEnabled(), AutoStart.SetEnabled),
             Check("settings.sound", s.SoundOnSwitch, value => { s.SoundOnSwitch = value; s.Save(); }),
+            Choice("settings.sound.choice", Sound.Choices.Select(sound => L10n.T("settings.sound." + sound)).ToArray(),
+                Array.IndexOf(Sound.Choices.ToArray(), s.LayoutSound),
+                index => { s.LayoutSound = Sound.Choices[index]; s.Save(); },
+                index => Sound.Play(Sound.Choices[index])),
             Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }),
             Choice("settings.layout.first", layoutNames, Array.IndexOf(layouts, new IntPtr(s.FirstLayout)),
                 index => { s.FirstLayout = layouts[index].ToInt64(); s.Save(); }),
@@ -390,9 +394,10 @@ internal sealed class SettingsForm : Form
         return check;
     }
 
-    private static Control Choice(string key, string[] options, int selected, Action<int> onChange)
+    private static Control Choice(string key, string[] options, int selected, Action<int> onChange,
+        Action<int>? onPreview = null)
     {
-        var row = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, RowCount = 1 };
+        var row = new TableLayoutPanel { AutoSize = true, ColumnCount = onPreview is null ? 2 : 3, RowCount = 1 };
         var label = new Label { Text = L10n.T(key), AutoSize = true, Anchor = AnchorStyles.Left };
         var combo = new ComboBox { Width = 210, DropDownStyle = ComboBoxStyle.DropDownList };
         combo.Items.AddRange(options);
@@ -400,6 +405,12 @@ internal sealed class SettingsForm : Form
         combo.SelectionChangeCommitted += (_, _) => onChange(combo.SelectedIndex);
         row.Controls.Add(label, 0, 0);
         row.Controls.Add(combo, 1, 0);
+        if (onPreview is not null)
+        {
+            var preview = new Button { Text = L10n.T("settings.sound.preview"), AutoSize = true };
+            preview.Click += (_, _) => onPreview(combo.SelectedIndex);
+            row.Controls.Add(preview, 2, 0);
+        }
         return row;
     }
 
