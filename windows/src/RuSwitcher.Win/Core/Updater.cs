@@ -5,6 +5,9 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows.Forms;
+using RuSwitcher.Win.Tray;
+using RuSwitcher.Win.UI;
+using static RuSwitcher.Win.Native.Win32;
 
 namespace RuSwitcher.Win.Core;
 
@@ -122,49 +125,131 @@ internal static class Updater
         finally { Interlocked.Exchange(ref _busy, 0); }
     }
 
+    private const string UpdateMode = "--install-update";
+    private static string UpdateDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NormalSwitcher", "Updates");
+    private static string HelperPath => Path.Combine(UpdateDirectory, "NormalSwitcher.Update.exe");
+
     private static async Task PromptUpdateAsync(Feed feed)
     {
-        string? directory = InstalledDirectory();
-        bool canInstall = directory != null && IsInstallerHash(feed.sha256);
-        string body = L10n.T("upd.available.body", feed.version, Current.ToString(3));
-        if (!string.IsNullOrWhiteSpace(feed.notes)) body += "\n\n" + feed.notes;
-        body += "\n\n" + L10n.T(canInstall ? "upd.install" : "upd.open");
-
-        var r = MessageBox.Show(body, L10n.T("upd.available.title"),
-            MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-        if (r == DialogResult.Yes)
+        if (InstalledExecutable() is { } installed &&
+            string.Equals(installed, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase) &&
+            IsInstallerHash(feed.sha256))
         {
-            if (!canInstall)
-            {
-                OpenRelease(feed.url);
-                return;
-            }
             try
             {
-                string installer = await DownloadInstallerAsync(feed.version, feed.sha256!);
-                var start = new ProcessStartInfo(installer) { UseShellExecute = true };
-                start.ArgumentList.Add("/SILENT");
+                Directory.CreateDirectory(UpdateDirectory);
+                await Task.Run(() => File.Copy(installed, HelperPath, overwrite: true));
+                var start = new ProcessStartInfo(HelperPath);
+                start.ArgumentList.Add(UpdateMode);
+                start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                start.ArgumentList.Add(feed.version);
+                start.ArgumentList.Add(feed.sha256!);
+                string notes = feed.notes ?? "";
+                start.ArgumentList.Add(notes[..Math.Min(notes.Length, 4000)]);
+                using var helper = Process.Start(start) ?? throw new IOException("Could not start updater");
+                await helper.WaitForExitAsync();
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+            {
+                MessageBox.Show(L10n.T("upd.helper.error"), L10n.T("app.name"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        string body = L10n.T("upd.available.body", feed.version, Current.ToString(3));
+        if (!string.IsNullOrWhiteSpace(feed.notes)) body += "\n\n" + feed.notes;
+        body += "\n\n" + L10n.T("upd.open");
+        if (MessageBox.Show(body, L10n.T("upd.available.title"),
+                MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+            OpenRelease(feed.url);
+    }
+
+    internal static bool RunHelper(string[] args)
+    {
+        if (args.Length == 0 || args[0] != UpdateMode) return false;
+        if (args.Length != 5 || !int.TryParse(args[1], out int pid) || pid <= 0 ||
+            !Version.TryParse(args[2], out var version) || version.Build < 0 ||
+            version.Revision >= 0 || version.ToString(3) != args[2] || version <= Current ||
+            !IsInstallerHash(args[3]) ||
+            !string.Equals(Environment.ProcessPath, HelperPath, StringComparison.OrdinalIgnoreCase) ||
+            InstalledExecutable() is not { } installed)
+            return true;
+
+        ApplicationConfiguration.Initialize();
+        using var dialog = new UpdateForm(args[2], Current.ToString(3), args[4]);
+        dialog.DownloadPage += () => OpenRelease(ReleaseUrl + args[2]);
+        dialog.Install += async () =>
+        {
+            bool appClosed = false;
+            string? installer = null;
+            try
+            {
+                installer = await DownloadInstallerAsync(args[2], args[3], dialog.ReportDownload);
+                dialog.ShowStage("upd.installing");
+                appClosed = await CloseForUpdateAsync(pid, installed);
+                string directory = Path.GetDirectoryName(installed)!;
+                var start = new ProcessStartInfo(installer);
+                start.ArgumentList.Add("/VERYSILENT");
+                start.ArgumentList.Add("/SUPPRESSMSGBOXES");
                 start.ArgumentList.Add("/SP-");
                 start.ArgumentList.Add("/NORESTART");
+                start.ArgumentList.Add("/NOCLOSEAPPLICATIONS");
                 start.ArgumentList.Add("/NORESTARTAPPLICATIONS");
-                start.ArgumentList.Add("/NORMALSWITCHERUPDATE=1");
                 start.ArgumentList.Add("/DIR=" + directory);
                 using var setup = Process.Start(start) ?? throw new IOException("Could not start setup");
-                Native.Win32.PostQuitMessage(0);
+                await setup.WaitForExitAsync();
+                if (setup.ExitCode != 0) throw new IOException($"Setup exited with code {setup.ExitCode}");
+                dialog.ShowStage("upd.restarting");
+                StartApp(installed);
+                dialog.Complete();
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                HttpRequestException or OperationCanceledException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                if (MessageBox.Show(L10n.T("upd.install.error"), L10n.T("app.name"),
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
-                    OpenRelease(feed.url);
+                if (appClosed)
+                {
+                    try { StartApp(installed); }
+                    catch (Exception restartError) when (restartError is IOException or System.ComponentModel.Win32Exception) { }
+                }
+                dialog.ShowError();
             }
-        }
-        else
+            finally
+            {
+                if (installer != null) RemoveUpdateFile(installer);
+            }
+        };
+        dialog.ShowDialog();
+        return true;
+    }
+
+    private static async Task<bool> CloseForUpdateAsync(int pid, string installed)
+    {
+        Process original;
+        try { original = Process.GetProcessById(pid); }
+        catch (ArgumentException) { return true; }
+        using (original)
         {
-            // "No" = skip this version until a newer one appears.
-            Settings.Current.SkippedVersion = feed.version;
-            Settings.Current.Save();
+            if (original.HasExited) return true;
+            IntPtr tray = FindWindowW(TrayIcon.WindowClass, "NormalSwitcher");
+            GetWindowThreadProcessId(tray, out uint windowPid);
+            if (windowPid != pid || !string.Equals(original.MainModule?.FileName, installed,
+                    StringComparison.OrdinalIgnoreCase) ||
+                PostMessageW(tray, WM_UPDATE_QUIT, IntPtr.Zero, IntPtr.Zero) == IntPtr.Zero)
+                throw new IOException("Could not close NormalSwitcher");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await original.WaitForExitAsync(timeout.Token);
+            return true;
         }
+    }
+
+    private static void StartApp(string installed)
+    {
+        using var app = Process.Start(new ProcessStartInfo(installed)
+        {
+            WorkingDirectory = Path.GetDirectoryName(installed)!
+        }) ?? throw new IOException("Could not restart NormalSwitcher");
     }
 
     private static void OpenRelease(string url)
@@ -173,16 +258,14 @@ internal static class Updater
         catch { /* The update remains available for a later check. */ }
     }
 
-    private static string? InstalledDirectory()
+    private static string? InstalledExecutable()
     {
         try
         {
             using var entry = Registry.CurrentUser.OpenSubKey(UninstallKey);
             if (entry?.GetValue("InstallLocation") is not string directory || !Path.IsPathFullyQualified(directory))
                 return null;
-            string installedExe = Path.GetFullPath(Path.Combine(directory, "NormalSwitcher.exe"));
-            return string.Equals(installedExe, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)
-                ? directory : null;
+            return Path.GetFullPath(Path.Combine(directory, "NormalSwitcher.exe"));
         }
         catch { return null; }
     }
@@ -190,12 +273,10 @@ internal static class Updater
     private static bool IsInstallerHash(string? hash) =>
         hash is { Length: 64 } && hash.All(Uri.IsHexDigit);
 
-    private static async Task<string> DownloadInstallerAsync(string version, string expectedHash)
+    private static async Task<string> DownloadInstallerAsync(string version, string expectedHash, Action<int?> report)
     {
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "NormalSwitcher", "Updates");
-        Directory.CreateDirectory(directory);
-        string installer = Path.Combine(directory, "NormalSwitcher-Setup.exe");
+        var progress = new Progress<int?>(report);
+        string installer = Path.Combine(UpdateDirectory, "NormalSwitcher-Setup.exe");
         string partial = installer + ".part";
         try
         {
@@ -210,21 +291,32 @@ internal static class Updater
             await using (var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None,
                 65536, useAsync: true))
             {
-                await CopyVerifiedInstallerAsync(source, output, expectedHash, deadline.Token).ConfigureAwait(false);
+                long? length = response.Content.Headers.ContentLength;
+                int previous = -1;
+                await CopyVerifiedInstallerAsync(source, output, expectedHash, deadline.Token, bytes =>
+                {
+                    if (length is not > 0) return;
+                    int percent = (int)Math.Min(100, bytes * 100 / length.Value);
+                    if (percent == previous) return;
+                    previous = percent;
+                    ((IProgress<int?>)progress).Report(percent);
+                }).ConfigureAwait(false);
             }
             File.Move(partial, installer, overwrite: true);
             return installer;
         }
-        finally
-        {
-            try { File.Delete(partial); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
+        finally { RemoveUpdateFile(partial); }
+    }
+
+    private static void RemoveUpdateFile(string path)
+    {
+        try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     internal static async Task CopyVerifiedInstallerAsync(Stream source, Stream output, string expectedHash,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Action<long>? report = null)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         byte[] buffer = new byte[65536];
@@ -236,6 +328,7 @@ internal static class Updater
             if (size > MaxInstallerBytes) throw new IOException("Update is too large");
             hash.AppendData(buffer.AsSpan(0, read));
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            report?.Invoke(size);
         }
         if (!CryptographicOperations.FixedTimeEquals(hash.GetHashAndReset(), Convert.FromHexString(expectedHash)))
             throw new IOException("Installer checksum does not match");

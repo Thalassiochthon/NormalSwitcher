@@ -255,6 +255,7 @@ internal static class Win32
     public const uint WM_APP = 0x8000;
     public const uint WM_TRAYICON = WM_APP + 1;
     public const uint WM_SETTINGS = WM_APP + 3;
+    public const uint WM_UPDATE_QUIT = WM_APP + 6;
     public const uint WM_SHORTCUTREADY = WM_APP + 4;
     public const uint WM_AUTOCONVERT = WM_APP + 2;   // auto-convert deferred off the LL-hook callback
     public const uint WM_HOTKEY = 0x0312;

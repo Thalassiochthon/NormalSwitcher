@@ -32,11 +32,31 @@ $exe = Join-Path $destination 'NormalSwitcher.exe'
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class NormalSwitcherSmoke {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr FindWindow(string className, string windowName);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowW", ExactSpelling = true)]
     public static extern IntPtr FindWindowByTitle(IntPtr className, string windowName);
+    private delegate bool EnumChildProc(IntPtr window, IntPtr data);
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr data);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr length,
+        StringBuilder title, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    public static IntPtr FindChildByTitle(IntPtr parent, string title) {
+        IntPtr result = IntPtr.Zero;
+        EnumChildWindows(parent, (window, data) => {
+            var text = new StringBuilder(256);
+            SendMessageTimeout(window, 0x000D, (IntPtr)text.Capacity, text, 2, 1000, out _);
+            if (text.ToString() != title) return true;
+            result = window;
+            return false;
+        }, IntPtr.Zero);
+        return result;
+    }
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 }
@@ -81,8 +101,13 @@ try {
     } | ConvertTo-Json -Depth 5 | Set-Content -Encoding ascii $settingsPath
     $running = Start-Process -FilePath $exe -PassThru
     Wait-ForWindow 'NormalSwitcherTrayWindow' 'NormalSwitcher' | Out-Null
-    $prompt = Wait-ForWindow '#32770' 'NormalSwitcher — Update available'
-    if (-not [NormalSwitcherSmoke]::PostMessage($prompt, 0x0111, [IntPtr]6, [IntPtr]::Zero)) {
+    $prompt = Wait-ForWindow $null 'NormalSwitcher — Update available'
+    [uint32]$updaterPid = 0
+    [NormalSwitcherSmoke]::GetWindowThreadProcessId($prompt, [ref]$updaterPid) | Out-Null
+    if ($updaterPid -eq $running.Id) { throw 'Update window must run independently' }
+    $button = [NormalSwitcherSmoke]::FindChildByTitle($prompt, 'Update now')
+    if ($button -eq [IntPtr]::Zero -or
+        -not [NormalSwitcherSmoke]::PostMessage($button, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) {
         throw 'Could not confirm the update'
     }
     if (-not $running.WaitForExit(60000)) { throw 'The updater did not hand off to the installer' }

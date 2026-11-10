@@ -13,8 +13,9 @@ namespace RuSwitcher.Win;
 internal static class Program
 {
     [STAThread]  // required for WinForms clipboard / dialogs
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (Updater.RunHelper(args)) return;
         using var instance = new Mutex(true, @"Local\NormalSwitcher.Windows", out bool firstInstance);
         if (!firstInstance)
         {

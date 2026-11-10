@@ -208,6 +208,11 @@ internal sealed class TrayIcon : IDisposable
                 AutoConvertActivated?.Invoke();
                 return IntPtr.Zero;
 
+            case WM_UPDATE_QUIT:
+                QuitRequested?.Invoke();
+                PostQuitMessage(0);
+                return IntPtr.Zero;
+
             case WM_DESTROY:
                 PostQuitMessage(0);
                 return IntPtr.Zero;
