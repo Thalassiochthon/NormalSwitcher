@@ -50,14 +50,15 @@ internal static class Program
                 first.Clear();
                 Clipboard.SetText("clipboard fixture");
                 await Task.Delay(650);
-                Chord(0x78); // Ctrl + Shift + F9, reserved for this fixture.
+                CheckRegistrationAndDispatch(1, 0x78); // Ctrl + Shift + F9.
                 await Until(IsClipboardMenuOpen, "clipboard menu");
                 Tap(0x28);
                 Tap(0x0D);
                 await Until(() => first.Text == "clipboard fixture", "history selection and paste");
 
-                first.SelectAll();
-                Chord(0x77);
+                first.SelectionStart = first.TextLength;
+                first.SelectionLength = 0;
+                CheckRegistrationAndDispatch(24, 0x77); // ChangeCase (20 + 4), Ctrl + Shift + F8.
                 await Until(() => first.Text == "CLIPBOARD FIXTURE", "configured change-case shortcut");
 
                 Console.WriteLine("Space, Enter, Tab, clipboard history paste and custom shortcut passed.");
@@ -139,14 +140,32 @@ internal static class Program
         Tap(0x5A);
     }
 
-    private static void Chord(byte key)
+    private static void CheckRegistrationAndDispatch(int id, uint key)
     {
-        Send(0xA2, false);
-        Send(0xA0, false);
-        Tap(key);
-        Send(0xA0, true);
-        Send(0xA2, true);
+        // Synthetic modifier chords on hosted Windows are not equivalent to a physical global
+        // shortcut. Verify Windows reserved the chord, then exercise the same WM_HOTKEY handler.
+        if (RegisterHotKey(IntPtr.Zero, 900, 6, key))
+        {
+            UnregisterHotKey(IntPtr.Zero, 900);
+            throw new InvalidOperationException("NormalSwitcher did not register the configured shortcut");
+        }
+        if (Marshal.GetLastWin32Error() != 1409)
+            throw new InvalidOperationException("Could not verify the global shortcut registration");
+        IntPtr tray = FindWindowW("NormalSwitcherTrayWindow", "NormalSwitcher");
+        if (tray == IntPtr.Zero || !PostMessageW(tray, 0x0312, (IntPtr)id, (IntPtr)((key << 16) | 6)))
+            throw new InvalidOperationException("Could not dispatch the registered shortcut");
     }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(IntPtr window, int id);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     private static void Tap(byte key)
     {

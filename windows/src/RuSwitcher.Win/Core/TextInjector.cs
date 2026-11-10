@@ -31,7 +31,7 @@ internal static class TextInjector
     }
 
     /// <summary>Send Ctrl+<paramref name="vk"/> (e.g. Ctrl+C / Ctrl+V).</summary>
-    public static void SendCtrl(ushort vk) => SendChord(VK_CONTROL, vk);
+    public static bool SendCtrl(ushort vk) => SendChord(VK_CONTROL, vk);
 
     /// <summary>Send Shift+<paramref name="vk"/> (e.g. Shift+Home to select to line start).</summary>
     public static void SendShift(ushort vk) => SendChord((ushort)VK_SHIFT, vk);
@@ -44,7 +44,7 @@ internal static class TextInjector
     }
 
     // modVk + vk as one chord. Carries the injected marker so our own hook ignores it.
-    private static void SendChord(ushort modVk, ushort vk)
+    private static bool SendChord(ushort modVk, ushort vk)
     {
         var inputs = new[]
         {
@@ -53,7 +53,7 @@ internal static class TextInjector
             Key(vk, '\0', dwFlags: KEYEVENTF_KEYUP),
             Key(modVk, '\0', dwFlags: KEYEVENTF_KEYUP),
         };
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>()) == inputs.Length;
     }
 
     private static INPUT Key(ushort vk, char scanChar, uint dwFlags) => new()

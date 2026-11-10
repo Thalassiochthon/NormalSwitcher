@@ -46,6 +46,7 @@ internal static class Program
         bool enabled = settings.KeyboardEnabled;
         long inputGeneration = 0;
         InputTarget? wordTarget = null, undoTarget = null;
+        (InputTarget Target, string Text, int NextVariant)? caseCycle = null;
         (List<TypedKey> Keys, InputTarget Target, long Generation, uint DeferredKey)? pendingAuto = null;
         (InputTarget Target, long Generation)? pendingTrigger = null;
 
@@ -57,6 +58,7 @@ internal static class Program
             pendingTrigger = null;
             buffer.Reset();
             wordTarget = null;
+            caseCycle = null;
             Converter.ClearReconvert();
         }
 
@@ -182,7 +184,7 @@ internal static class Program
         tray.QuitRequested += () => Log("quit requested");
         tray.Show("NormalSwitcher");
         tray.ClipboardHistory.Pasted += ResetInput;
-        tray.Shortcuts.Activated += action =>
+        tray.Shortcuts.Activated += async action =>
         {
             if (!enabled || InputTarget.Capture() is not { IsPasswordEdit: false } target) return;
             switch (action)
@@ -201,22 +203,53 @@ internal static class Program
                     ResetInput();
                     break;
                 case ShortcutAction.ChangeCase:
+                    if (!settings.ConvertWholeLine && wordTarget == target && !buffer.IsEmpty)
+                    {
+                        var cycle = caseCycle;
+                        int variant = cycle?.NextVariant ?? 0;
+                        string currentWord = cycle?.Text ?? KeyMapper.ConvertWord(buffer.CurrentWord, target.Layout);
+                        long generation = inputGeneration;
+                        if (currentWord.Length > 0 && await target.MatchesTextAtCaretAsync(currentWord)
+                            && CanEdit(target, generation, checkLayout: true))
+                        {
+                            string next = Converter.CaseVariant(currentWord, variant);
+                            if (next == currentWord)
+                            {
+                                variant = (variant + 1) % 3;
+                                next = Converter.CaseVariant(currentWord, variant);
+                            }
+                            if (next != currentWord && TextInjector.Replace(currentWord.Length, next))
+                            {
+                                Converter.ClearReconvert();
+                                caseCycle = (target, next, (variant + 1) % 3);
+                            }
+                        }
+                        break;
+                    }
                     tray.ClipboardHistory.Poll();
-                    Converter.ChangeSelectionCase();
+                    Converter.ChangeSelectionCase(settings.ConvertWholeLine);
                     tray.ClipboardHistory.SkipCurrent();
                     ResetInput();
                     break;
                 case ShortcutAction.AddException:
-                    if (wordTarget != target || buffer.IsEmpty) break;
-                    string word = KeyMapper.ConvertWord(buffer.CurrentWord, target.Layout).ToLowerInvariant();
-                    if (word.Length > 1 && !settings.NeverConvert.Contains(word))
+                    if (wordTarget == target && !buffer.IsEmpty)
+                        AddException(KeyMapper.ConvertWord(buffer.CurrentWord, target.Layout).ToLowerInvariant());
+                    else
                     {
-                        settings.NeverConvert.Add(word);
-                        settings.Save();
+                        tray.ClipboardHistory.Poll();
+                        Converter.WithSelectedWord(AddException);
+                        tray.ClipboardHistory.SkipCurrent();
                     }
                     break;
             }
         };
+
+        void AddException(string word)
+        {
+            if (word.Length <= 1 || settings.NeverConvert.Contains(word)) return;
+            settings.NeverConvert.Add(word);
+            settings.Save();
+        }
 
         // A hidden WinForms control forces a WindowsFormsSynchronizationContext onto this thread, so
         // the background update check can marshal its message box back here (dispatched by our loop).
@@ -241,6 +274,7 @@ internal static class Program
                 return false;
 
             tray.Shortcuts.CancelPending();
+            caseCycle = null;
             Converter.ClearReconvert();
             if (ShortcutHeld() || InputTarget.Capture() is not { } target || target.IsPasswordEdit)
             {

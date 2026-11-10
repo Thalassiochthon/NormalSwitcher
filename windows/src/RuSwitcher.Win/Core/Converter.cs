@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using static RuSwitcher.Win.Native.Win32;
 
@@ -127,26 +128,78 @@ internal static class Converter
             : KeyMapper.ConvertText(sel, sourceHkl, targetHkl));
     }
 
-    internal static bool ChangeSelectionCase() => TransformSelection(text =>
-        text == text.ToUpperInvariant() ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    internal static bool ChangeSelectionCase(bool wholeLine)
+    {
+        if (wholeLine)
+        {
+            TextInjector.SendShift(VK_HOME);
+            Thread.Sleep(40);
+        }
+        return TransformSelection(text => text == text.ToUpperInvariant() ? text.ToLowerInvariant() : text.ToUpperInvariant());
+    }
+
+    internal static void WithSelectedWord(Action<string> action)
+    {
+        TransformSelection(text =>
+        {
+            string word = text.Trim();
+            if (word.Length > 1 && word.All(char.IsLetter)) action(word.ToLowerInvariant());
+            return text;
+        });
+    }
+
+    internal static string CaseVariant(string word, int variant) => variant switch
+    {
+        0 => word.ToUpperInvariant(),
+        1 => word.ToLowerInvariant(),
+        _ => word[..1].ToUpperInvariant() + word[1..].ToLowerInvariant()
+    };
 
     private static bool TransformSelection(Func<string, string> transform)
     {
-        string? saved = SafeGetText();
-        SafeClear();
-        TextInjector.SendCtrl(VK_C);
-        Thread.Sleep(60);                       // let the focused app place the selection on the clipboard
-        string sel = SafeGetText() ?? "";
-        if (sel.Length == 0) { RestoreClipboard(saved); return false; }   // nothing selected
+        if (InputTarget.Capture() is not { IsPasswordEdit: false } target) return false;
+        uint initial = GetClipboardSequenceNumber();
+        uint owned = 0;
+        IDataObject? saved = null;
+        try
+        {
+            saved = Clipboard.GetDataObject();
+            if (GetClipboardSequenceNumber() != initial || !TextInjector.SendCtrl(VK_C)) return false;
+            Thread.Sleep(60); // The source processes Copy on its own UI thread.
 
-        string converted = transform(sel);
-        if (converted == sel) { RestoreClipboard(saved); return false; }  // no-op
+            uint copied = GetClipboardSequenceNumber();
+            if (copied == initial || copied == 0) return false;
+            GetWindowThreadProcessId(target.Foreground, out uint targetProcess);
+            GetWindowThreadProcessId(GetClipboardOwner(), out uint owner);
+            if (targetProcess == 0 || owner != targetProcess) return false;
+            owned = copied;
+            string selected = Clipboard.GetText(TextDataFormat.UnicodeText);
+            if (selected.Length == 0 || GetClipboardSequenceNumber() != owned) return false;
 
-        SafeSetText(converted);
-        TextInjector.SendCtrl(VK_V);
-        Thread.Sleep(60);                       // let the paste happen before we restore the clipboard
-        RestoreClipboard(saved);
-        return true;
+            string converted = transform(selected);
+            if (converted == selected || GetClipboardSequenceNumber() != owned
+                || InputTarget.Capture() is not { IsPasswordEdit: false } current || !target.SameControl(current))
+                return false;
+
+            Clipboard.SetText(converted, TextDataFormat.UnicodeText);
+            owned = GetClipboardSequenceNumber();
+            if (!TextInjector.SendCtrl(VK_V)) return false;
+            Thread.Sleep(60); // Let the focused control take the clipboard before restoring it.
+            return true;
+        }
+        catch (ExternalException) { return false; }
+        finally
+        {
+            if (owned != 0 && GetClipboardSequenceNumber() == owned)
+            {
+                try
+                {
+                    if (saved == null) Clipboard.Clear();
+                    else Clipboard.SetDataObject(saved, copy: true, retryTimes: 4, retryDelay: 20);
+                }
+                catch (ExternalException) { }
+            }
+        }
     }
 
     /// <summary>issue #24: convert the whole current line — select it with Shift+Home, then run
@@ -170,21 +223,4 @@ internal static class Converter
         return s.Substring(a, b - a).ToLowerInvariant();
     }
 
-    // Clipboard is shared + can be briefly locked by other apps — retry, never throw.
-    private static string? SafeGetText()
-    {
-        try { return Clipboard.ContainsText() ? Clipboard.GetText() : null; } catch { return null; }
-    }
-    private static void SafeSetText(string s)
-    {
-        for (int i = 0; i < 6; i++) { try { Clipboard.SetText(s); return; } catch { Thread.Sleep(15); } }
-    }
-    private static void SafeClear()
-    {
-        for (int i = 0; i < 6; i++) { try { Clipboard.Clear(); return; } catch { Thread.Sleep(15); } }
-    }
-    private static void RestoreClipboard(string? saved)
-    {
-        if (string.IsNullOrEmpty(saved)) SafeClear(); else SafeSetText(saved);
-    }
 }
