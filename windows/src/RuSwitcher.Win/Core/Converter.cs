@@ -28,11 +28,11 @@ internal static class Converter
     /// <summary>Record an auto-conversion so the trigger can reverse it — and so reversing it teaches
     /// an exception (learn-from-undo). <paramref name="onScreen"/> is what's now shown; the
     /// <paramref name="alternative"/> is the original typed word restored on undo.</summary>
-    public static void NoteAutoConversion(string onScreen, string alternative, IntPtr onScreenHkl, IntPtr altHkl)
+    public static void NoteAutoConversion(string onScreen, string alternative, IntPtr onScreenHkl, IntPtr altHkl, bool learn = true)
     {
         _aText = onScreen; _aHkl = onScreenHkl;
         _bText = alternative; _bHkl = altHkl;
-        _lastWasAuto = true;
+        _lastWasAuto = learn;
     }
 
     // Trailing keys whose char in the CURRENT layout is sentence punctuation are kept literally,

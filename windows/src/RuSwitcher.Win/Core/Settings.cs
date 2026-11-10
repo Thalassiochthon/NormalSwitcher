@@ -38,6 +38,15 @@ public sealed class Settings
     /// trigger teaches an exception (learn-from-undo).</summary>
     public bool AutoConvert { get; set; } = false;
 
+    public bool FixTwoCaps { get; set; }
+    public bool FixTypos { get; set; }
+    public bool ExtendedDictionary { get; set; }
+    public bool WordEndOnSpace { get; set; } = true;
+    public Dictionary<string, string> Abbreviations { get; set; } = new(StringComparer.Ordinal);
+    public string UiLanguage { get; set; } = "";
+
+    internal bool HasAutomaticEdits => AutoConvert || FixTwoCaps || FixTypos || Abbreviations.Count > 0;
+
     public List<string> ExcludedApps { get; set; } = new();
 
     /// <summary>Words never auto-converted (typed form, lowercase). Grown by learn-from-undo.</summary>

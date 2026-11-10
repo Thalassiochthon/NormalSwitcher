@@ -31,41 +31,70 @@ internal static class AutoConverter
         string srcTag = SmartConvert.LangTag(sourceHkl);
         bool caps = keys.All(k => k.Caps);
 
+        var settings = Settings.Current;
+        string lower = typed.ToLowerInvariant();
+        if (settings.Abbreviations.TryGetValue(lower, out string? expansion) && !string.IsNullOrEmpty(expansion))
+            return Replace(expansion, sourceHkl, learn: false);
+        if (settings.NeverConvert.Contains(lower)) return false;
+
+        var targets = LayoutSwitcher.ConversionTargets(sourceHkl).ToArray();
         IntPtr targetHkl = IntPtr.Zero;
         string? converted = null;
-        foreach (var layout in LayoutSwitcher.ConversionTargets(sourceHkl))
+        if (settings.AutoConvert)
         {
-            string candidate = KeyMapper.ConvertWord(keys, layout);
-            if (candidate.Length != keys.Count || candidate == typed) continue;
-            if (!ShouldConvert(typed, candidate, srcTag, SmartConvert.LangTag(layout), caps)) continue;
-            if (converted != null) return false; // More than one plausible destination.
-            targetHkl = layout;
-            converted = candidate;
+            foreach (var layout in targets)
+            {
+                string candidate = KeyMapper.ConvertWord(keys, layout);
+                if (candidate.Length != keys.Count || candidate == typed) continue;
+                string targetTag = SmartConvert.LangTag(layout);
+                if (!ShouldConvertPure(typed, candidate, srcTag, targetTag, caps, Dict.Available,
+                    Dict.CheckWord, settings.NeverConvert, settings.AlwaysConvert, CheckTarget))
+                    continue;
+                if (converted != null) return false; // More than one plausible destination.
+                targetHkl = layout;
+                converted = settings.FixTwoCaps && !caps
+                    ? TextFixes.TwoCaps(candidate, word => CheckTarget(word, targetTag) == true) ?? candidate
+                    : candidate;
+            }
         }
-        if (converted == null) return false;
+        if (converted != null) return Replace(converted, targetHkl, learn: true);
 
-        if (!stillCurrent() || !input.HasPlainTextAtCaret(typed + " ") || !stillCurrent()
-            || !TextInjector.Replace(backspaces: keys.Count + 1, text: converted + " "))
-            return false;
+        if (settings.FixTypos && targets.Length == 1 &&
+            TextFixes.Number(keys, typed, key => KeyMapper.TranslateIn(key, targets[0])) is { } number)
+            return Replace(number, sourceHkl, learn: true);
 
-        LayoutSwitcher.SwitchTo(targetHkl);
-        Converter.NoteAutoConversion(converted + " ", typed + " ", targetHkl, sourceHkl);
-        return true;
+        if (IsHebrew(srcTag)) return false;
+        if (settings.FixTwoCaps && !caps &&
+            TextFixes.TwoCaps(typed, word => Dict.CheckWord(word, srcTag) == true) is { } casing)
+            return Replace(casing, sourceHkl, learn: false);
+        if (settings.FixTypos && TextFixes.Typo(keys, typed, key => KeyMapper.TranslateIn(key, sourceHkl),
+                word => CheckTarget(word, srcTag), word => CheckTarget(word, srcTag) == true) is { } typo)
+            return Replace(typo, sourceHkl, learn: true);
+        return false;
+
+        bool? CheckTarget(string word, string tag) =>
+            settings.ExtendedDictionary && FrequencyWords.Contains(word, tag) ? true : Dict.CheckWord(word, tag);
+
+        bool Replace(string replacement, IntPtr layout, bool learn)
+        {
+            if (replacement == typed || !stillCurrent() || !input.HasPlainTextAtCaret(typed + " ")
+                || !stillCurrent() || !TextInjector.Replace(backspaces: keys.Count + 1, text: replacement + " "))
+                return false;
+
+            if (layout != sourceHkl) LayoutSwitcher.SwitchTo(layout);
+            Converter.NoteAutoConversion(replacement + " ", typed + " ", layout, sourceHkl, learn);
+            return true;
+        }
     }
 
-    // Bound to the real dictionary + settings; the decision itself lives in the pure ShouldConvertPure
-    // so it can be unit-tested off Windows (no COM / no Win32).
-    private static bool ShouldConvert(string typed, string converted, string srcTag, string tgtTag, bool caps) =>
-        ShouldConvertPure(typed, converted, srcTag, tgtTag, caps,
-            Dict.Available, Dict.CheckWord,
-            Settings.Current.NeverConvert, Settings.Current.AlwaysConvert);
+    private static bool IsHebrew(string tag) => tag == "he" || tag.StartsWith("he-", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The verdict logic, ported from the macOS <c>LayoutDetector.decide</c>. Pure: the
     /// dictionary and exception lists are passed in, so it is fully unit-testable. Returns true only
     /// when the word should be flipped to the opposite layout.</summary>
     internal static bool ShouldConvertPure(string typed, string converted, string srcTag, string tgtTag,
         bool caps, bool dictAvailable, Func<string, string, bool?> checkWord,
-        ICollection<string> never, ICollection<string> always)
+        ICollection<string> never, ICollection<string> always, Func<string, string, bool?>? checkTarget = null)
     {
         string typedLc = typed.ToLowerInvariant();
         string convertedLc = converted.ToLowerInvariant();
@@ -84,8 +113,8 @@ internal static class AutoConverter
         }
 
         // --- Hebrew cross-script pairs (positive signal only, from the non-Hebrew side) ---
-        bool srcHe = srcTag == "he" || srcTag.StartsWith("he-", StringComparison.OrdinalIgnoreCase);
-        bool tgtHe = tgtTag == "he" || tgtTag.StartsWith("he-", StringComparison.OrdinalIgnoreCase);
+        bool srcHe = IsHebrew(srcTag);
+        bool tgtHe = IsHebrew(tgtTag);
         if (srcHe || tgtHe)
         {
             string sideTag = srcHe ? tgtTag : srcTag;
@@ -104,7 +133,7 @@ internal static class AutoConverter
 
         // --- common same-alphabet-swap case ---
         if (!dictAvailable) return false;
-        return checkWord(convertedLc, tgtTag) == true && checkWord(typedLc, srcTag) == false;
+        return (checkTarget ?? checkWord)(convertedLc, tgtTag) == true && checkWord(typedLc, srcTag) == false;
     }
 
     private static bool IsAllCaps(string s) =>

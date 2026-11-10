@@ -10,12 +10,12 @@ namespace RuSwitcher.Win.Core;
 /// </summary>
 internal static class L10n
 {
-    private static readonly string Lang = Resolve();
-
     private static string Resolve()
     {
         try
         {
+            string preferred = Settings.Current.UiLanguage;
+            if (Table.ContainsKey(preferred)) return preferred;
             string two = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLowerInvariant();
             return Table.ContainsKey(two) ? two : "en";
         }
@@ -26,7 +26,7 @@ internal static class L10n
     /// with any arguments.</summary>
     public static string T(string key, params object[] args)
     {
-        string s = Lookup(Lang, key) ?? Lookup("en", key) ?? key;
+        string s = Lookup(Resolve(), key) ?? Lookup("en", key) ?? key;
         if (args.Length == 0) return s;
         try { return string.Format(s, args); }
         catch (FormatException) { return s; }   // a malformed translation must never crash the UI
@@ -52,6 +52,14 @@ internal static class L10n
             ["settings.layout.first"] = "First layout:",
             ["settings.layout.second"] = "Second layout:",
             ["settings.layout.hint"] = "Choose two different layouts to limit correction to that pair.",
+            ["settings.language"] = "Interface language:",
+            ["settings.wordEnd.space"] = "Correct on Space",
+            ["settings.fixCaps"] = "Fix two initial capitals",
+            ["settings.fixTypos"] = "Fix clear typos and numeric separators",
+            ["settings.frequencyWords"] = "Use extended English and Russian dictionaries",
+            ["settings.abbreviations"] = "Text replacements…",
+            ["settings.abbreviations.hint"] = "Use one rule per line: shortcut = full text",
+            ["settings.abbreviations.error"] = "Each shortcut must be unique and have replacement text.",
             ["settings.tab.general"] = "General",
             ["settings.tab.hotkeys"] = "Shortcuts",
             ["settings.tab.automatic"] = "Auto-correction",
@@ -110,6 +118,14 @@ internal static class L10n
             ["settings.layout.first"] = "Первая раскладка:",
             ["settings.layout.second"] = "Вторая раскладка:",
             ["settings.layout.hint"] = "Выберите две разные раскладки, чтобы исправление работало только внутри этой пары.",
+            ["settings.language"] = "Язык интерфейса:",
+            ["settings.wordEnd.space"] = "Исправлять по пробелу",
+            ["settings.fixCaps"] = "Исправлять две заглавные в начале слова",
+            ["settings.fixTypos"] = "Исправлять явные опечатки и разделители чисел",
+            ["settings.frequencyWords"] = "Использовать расширенные словари русского и английского",
+            ["settings.abbreviations"] = "Автозамены…",
+            ["settings.abbreviations.hint"] = "Одно правило на строку: сокращение = полный текст",
+            ["settings.abbreviations.error"] = "Для каждого сокращения укажите текст замены. Сокращения не должны повторяться.",
             ["settings.tab.general"] = "Основные",
             ["settings.tab.hotkeys"] = "Сочетания",
             ["settings.tab.automatic"] = "Автоисправление",

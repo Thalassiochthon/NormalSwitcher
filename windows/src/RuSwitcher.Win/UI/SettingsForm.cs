@@ -34,7 +34,13 @@ internal sealed class SettingsForm : Form
                 index => { s.FirstLayout = layouts[index].ToInt64(); s.Save(); }),
             Choice("settings.layout.second", layoutNames, Array.IndexOf(layouts, new IntPtr(s.SecondLayout)),
                 index => { s.SecondLayout = layouts[index].ToInt64(); s.Save(); }),
-            new Label { Text = L10n.T("settings.layout.hint"), MaximumSize = new Size(440, 0), AutoSize = true });
+            new Label { Text = L10n.T("settings.layout.hint"), MaximumSize = new Size(440, 0), AutoSize = true },
+            Choice("settings.language", [L10n.T("settings.layout.auto"), "English", "Русский"],
+                Array.IndexOf(new[] { "", "en", "ru" }, s.UiLanguage), index =>
+                {
+                    s.UiLanguage = new[] { "", "en", "ru" }[index];
+                    s.Save();
+                }));
 
         var triggers = Enum.GetValues<TriggerKind>().Select(TrayIcon.TriggerName).ToArray();
         AddPage("hotkeys",
@@ -55,9 +61,15 @@ internal sealed class SettingsForm : Form
 
         var exceptions = new Button { Text = L10n.T("settings.exceptions"), AutoSize = true };
         exceptions.Click += (_, _) => { using var form = new ExceptionsForm(); form.ShowDialog(this); };
+        var abbreviations = new Button { Text = L10n.T("settings.abbreviations"), AutoSize = true };
+        abbreviations.Click += (_, _) => { using var form = new AbbreviationsForm(); form.ShowDialog(this); };
         AddPage("automatic",
             Check("settings.auto", s.AutoConvert, value => { s.AutoConvert = value; s.Save(); }),
-            exceptions);
+            Check("settings.wordEnd.space", s.WordEndOnSpace, value => { s.WordEndOnSpace = value; s.Save(); }),
+            Check("settings.fixCaps", s.FixTwoCaps, value => { s.FixTwoCaps = value; s.Save(); }),
+            Check("settings.fixTypos", s.FixTypos, value => { s.FixTypos = value; s.Save(); }),
+            Check("settings.frequencyWords", s.ExtendedDictionary, value => { s.ExtendedDictionary = value; s.Save(); }),
+            abbreviations, exceptions);
 
         var persist = new CheckBox
         {
@@ -96,7 +108,8 @@ internal sealed class SettingsForm : Form
         AddPage("about",
             new Label { Text = $"NormalSwitcher {Updater.Current.ToString(3)}", AutoSize = true },
             Link("github.com/antonjas/NormalSwitcher", "https://github.com/antonjas/NormalSwitcher"),
-            Link(L10n.T("settings.credit"), "https://github.com/rashn/RuSwitcher"));
+            Link(L10n.T("settings.credit"), "https://github.com/rashn/RuSwitcher"),
+            Link("FrequencyWords · CC BY-SA 4.0", "https://github.com/antonjas/NormalSwitcher/blob/personal/dicts/LICENSE"));
 
         var close = new Button { Text = L10n.T("settings.close"), AutoSize = true, DialogResult = DialogResult.OK };
         var footer = new FlowLayoutPanel

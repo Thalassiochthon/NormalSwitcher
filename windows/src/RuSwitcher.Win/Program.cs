@@ -125,7 +125,7 @@ internal static class Program
             pendingAuto = null;
             if (request is not { } word) return;
             if (AutoConverter.TryConvertWord(word.Keys, word.Target,
-                    () => settings.AutoConvert && CanEdit(word.Target, word.Generation, checkLayout: true)))
+                    () => settings.HasAutomaticEdits && CanEdit(word.Target, word.Generation, checkLayout: true)))
                 undoTarget = word.Target;
         };
         tray.EnabledChanged += on => { enabled = on; ResetInput(); Log($"enabled = {on}"); };
@@ -172,7 +172,7 @@ internal static class Program
                 wordTarget = target;
             }
 
-            if (vk == KeystrokeBuffer.VK_SPACE && settings.AutoConvert && !buffer.IsEmpty)
+            if (vk == KeystrokeBuffer.VK_SPACE && settings.WordEndOnSpace && settings.HasAutomaticEdits && !buffer.IsEmpty)
             {
                 pendingAuto = (new List<TypedKey>(buffer.CurrentWord), target, inputGeneration);
                 tray.PostAutoConvert();
