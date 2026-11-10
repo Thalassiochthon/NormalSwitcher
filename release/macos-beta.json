@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0a",
-  "build": "77",
+  "version": "1.2.0b",
+  "build": "78",
   "dev": "",
-  "notes": "Бета 1.2.0 — задачи из буфера обмена, компактная история с поиском, шифрование истории и понятный статус автоисправления.\n\nЗадачи: Control+Shift+T. Сохранить текст буфера в задачу: Control+Option+Shift+V. История: Control+Shift+V. Сочетания меняются в настройках.\n\nЭто тестовый выпуск для добровольной проверки. Проверьте создание и сохранение задач, вставку в нужное окно, горячие клавиши и работу после перезапуска.\n\nBeta 1.2.0: clipboard tasks, compact searchable history, encrypted clipboard persistence and automatic-correction status. Configurable shortcuts; please test capture, paste focus and persistence after restart."
+  "notes": "В этой сборке исправлена упаковка установочного образа.\n\nБета 1.2.0 — задачи из буфера обмена, компактная история с поиском, шифрование истории и понятный статус автоисправления.\n\nЗадачи: Control+Shift+T. Сохранить текст буфера в задачу: Control+Option+Shift+V. История: Control+Shift+V. Сочетания меняются в настройках.\n\nЭто тестовый выпуск для добровольной проверки. Проверьте создание и сохранение задач, вставку в нужное окно, горячие клавиши и работу после перезапуска.\n\nThis build fixes the installer image packaging.\n\nBeta 1.2.0: clipboard tasks, compact searchable history, encrypted clipboard persistence and automatic-correction status. Configurable shortcuts; please test capture, paste focus and persistence after restart."
 }
