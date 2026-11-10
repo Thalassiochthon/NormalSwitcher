@@ -9,7 +9,8 @@ if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
 function Run-Installer($file, [bool] $update) {
     $arguments = @('/VERYSILENT', '/SP-', '/NORESTART', '/NORESTARTAPPLICATIONS', "/DIR=`"$destination`"")
     if ($update) { $arguments += '/NORMALSWITCHERUPDATE=1' }
-    $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru -Wait
+    $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
+    if (-not $process.WaitForExit(60000)) { throw 'Installer did not finish' }
     if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
 }
 function Build-Installer($version, $binary) {
