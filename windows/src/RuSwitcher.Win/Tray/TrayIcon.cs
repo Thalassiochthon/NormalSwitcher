@@ -1,34 +1,33 @@
+using System.Drawing;
 using RuSwitcher.Win.Core;
 using static RuSwitcher.Win.Native.Win32;
 
 namespace RuSwitcher.Win.Tray;
 
 /// <summary>
-/// Menu-bar presence — the Windows counterpart of the macOS NSStatusItem. A hidden message
-/// window receives tray callbacks; right-click shows a menu: Enable toggle, a Trigger submenu,
-/// a whole-line toggle, «Settings…», and Quit. Menu state is read live from Settings.Current
-/// so it stays in sync with the settings window.
+/// Shows the active keyboard layout and the app menu in the notification area.
 /// </summary>
 internal sealed class TrayIcon : IDisposable
 {
     private const uint ID_ENABLE = 1;
     private const uint ID_QUIT = 2;
-    private const uint ID_TRIG_CTRL = 10;
-    private const uint ID_TRIG_SHIFT = 11;
-    private const uint ID_TRIG_PAUSE = 12;
-    private const uint ID_WHOLELINE = 13;
     private const uint ID_SETTINGS = 14;
     private const uint ID_AUTO = 15;
     private const uint ID_UPDATE = 16;
+    private const uint ID_LAYOUT_FIRST = 100;
 
     private readonly WndProc _wndProc;
     private IntPtr _hwnd;
     private NOTIFYICONDATA _nid;
-    private System.Drawing.Icon? _icon;
+    private readonly System.Windows.Forms.Timer _layoutTimer = new() { Interval = 250 };
+    private Icon? _icon;
+    private IntPtr _shownLayout;
+    private bool _menuOpen;
+    private string _tooltip = "";
+    private uint _taskbarCreated;
     private bool _enabled = true;
 
     public event Action<bool>? EnabledChanged;
-    public event Action<TriggerKind>? TriggerChanged;
     public event Action? SettingsRequested;
     public event Action? UpdateRequested;
     public event Action? QuitRequested;
@@ -68,8 +67,10 @@ internal sealed class TrayIcon : IDisposable
         _hwnd = CreateWindowExW(0, "NormalSwitcherTrayWindow", "NormalSwitcher",
             0, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
-        if (Environment.ProcessPath is { } path)
-            _icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
+        _tooltip = tooltip;
+        _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
+        _shownLayout = LayoutSwitcher.Current();
+        _icon = LayoutIcon.Create(_shownLayout);
         _nid = new NOTIFYICONDATA
         {
             cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<NOTIFYICONDATA>(),
@@ -77,10 +78,39 @@ internal sealed class TrayIcon : IDisposable
             uID = 1,
             uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage = WM_TRAYICON,
-            hIcon = _icon?.Handle ?? LoadIconW(IntPtr.Zero, IDI_APPLICATION),
-            szTip = tooltip,
+            hIcon = _icon.Handle,
+            szTip = LayoutTooltip(_shownLayout),
         };
         Shell_NotifyIconW(NIM_ADD, ref _nid);
+        _layoutTimer.Tick += (_, _) => RefreshLayout();
+        _layoutTimer.Start();
+    }
+
+    private string LayoutTooltip(IntPtr layout)
+    {
+        string text = $"{_tooltip} · {LayoutIcon.Name(layout)}";
+        return text.Length <= 127 ? text : text[..127];
+    }
+
+    private void RefreshLayout()
+    {
+        if (_menuOpen) return;
+        IntPtr layout = LayoutSwitcher.Current();
+        if (layout == _shownLayout) return;
+
+        var next = LayoutIcon.Create(layout);
+        var data = _nid;
+        data.hIcon = next.Handle;
+        data.szTip = LayoutTooltip(layout);
+        if (!Shell_NotifyIconW(NIM_MODIFY, ref data))
+        {
+            next.Dispose();
+            return;
+        }
+        _icon?.Dispose();
+        _icon = next;
+        _nid = data;
+        _shownLayout = layout;
     }
 
     internal static string TriggerName(TriggerKind t) => t switch
@@ -91,23 +121,13 @@ internal sealed class TrayIcon : IDisposable
         _ => "?",
     };
 
-    /// <summary>issue #7 (indicator): human-readable name of a layout from its HKL primary LANGID.</summary>
-    private static string LayoutName(IntPtr hkl) => ((int)hkl.ToInt64() & 0x3FF) switch
-    {
-        0x19 => "Русский",
-        0x09 => "English",
-        0x22 => "Українська",
-        0x23 => "Беларуская",
-        0x02 => "Български",
-        0x0D => "עברית",
-        0x08 => "Ελληνικά",
-        0x2B => "Հայերեն",
-        0x37 => "ქართული",
-        _ => "Layout",
-    };
-
     private IntPtr WindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
+        if (msg == _taskbarCreated && msg != 0)
+        {
+            Shell_NotifyIconW(NIM_ADD, ref _nid);
+            return IntPtr.Zero;
+        }
         switch (msg)
         {
             case WM_TRAYICON when ((uint)(lParam.ToInt64() & 0xFFFF)) is WM_RBUTTONUP or WM_LBUTTONUP:
@@ -122,28 +142,6 @@ internal sealed class TrayIcon : IDisposable
                 AutoConvertActivated?.Invoke();
                 return IntPtr.Zero;
 
-            case WM_COMMAND:
-                uint cmd = (uint)(wParam.ToInt64() & 0xFFFF);
-                switch (cmd)
-                {
-                    case ID_ENABLE: _enabled = !_enabled; EnabledChanged?.Invoke(_enabled); break;
-                    case ID_QUIT: QuitRequested?.Invoke(); PostQuitMessage(0); break;
-                    case ID_SETTINGS: SettingsRequested?.Invoke(); break;
-                    case ID_UPDATE: UpdateRequested?.Invoke(); break;
-                    case ID_TRIG_CTRL: SetTrigger(TriggerKind.CtrlDoubleTap); break;
-                    case ID_TRIG_SHIFT: SetTrigger(TriggerKind.ShiftDoubleTap); break;
-                    case ID_TRIG_PAUSE: SetTrigger(TriggerKind.PauseBreak); break;
-                    case ID_WHOLELINE:
-                        Settings.Current.ConvertWholeLine = !Settings.Current.ConvertWholeLine;
-                        Settings.Current.Save();
-                        break;
-                    case ID_AUTO:
-                        Settings.Current.AutoConvert = !Settings.Current.AutoConvert;
-                        Settings.Current.Save();
-                        break;
-                }
-                return IntPtr.Zero;
-
             case WM_DESTROY:
                 PostQuitMessage(0);
                 return IntPtr.Zero;
@@ -151,32 +149,20 @@ internal sealed class TrayIcon : IDisposable
         return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 
-    private void SetTrigger(TriggerKind t)
-    {
-        if (t == Settings.Current.Trigger) return;
-        Settings.Current.Trigger = t;
-        Settings.Current.Save();
-        TriggerChanged?.Invoke(t);
-    }
-
     private void ShowMenu()
     {
+        if (_menuOpen) return;
         var s = Settings.Current;
         IntPtr menu = CreatePopupMenu();
-
-        // Layout indicator (disabled header, issue #7): shows the current keyboard layout.
-        AppendMenuW(menu, MF_STRING | MF_DISABLED | MF_GRAYED, 0, $"⌨  {LayoutName(LayoutSwitcher.Current())}");
-        AppendMenuW(menu, MF_SEPARATOR, 0, null);
-
-        AppendMenuW(menu, MF_STRING | (_enabled ? MF_CHECKED : MF_UNCHECKED), ID_ENABLE, L10n.T("tray.enable"));
-
-        IntPtr sub = CreatePopupMenu();
-        AppendMenuW(sub, MF_STRING | Chk(s.Trigger == TriggerKind.CtrlDoubleTap), ID_TRIG_CTRL, TriggerName(TriggerKind.CtrlDoubleTap));
-        AppendMenuW(sub, MF_STRING | Chk(s.Trigger == TriggerKind.ShiftDoubleTap), ID_TRIG_SHIFT, TriggerName(TriggerKind.ShiftDoubleTap));
-        AppendMenuW(sub, MF_STRING | Chk(s.Trigger == TriggerKind.PauseBreak), ID_TRIG_PAUSE, TriggerName(TriggerKind.PauseBreak));
-        AppendSubMenuW(menu, MF_STRING | MF_POPUP, sub, L10n.T("tray.trigger", TriggerName(s.Trigger)));
-
-        AppendMenuW(menu, MF_STRING | Chk(s.ConvertWholeLine), ID_WHOLELINE, L10n.T("tray.wholeline"));
+        IntPtr target = GetForegroundWindow();
+        var layouts = LayoutSwitcher.Installed();
+        IntPtr current = LayoutSwitcher.Current();
+        for (int i = 0; i < layouts.Length; i++)
+            AppendMenuW(menu, MF_STRING | Chk(layouts[i] == current), ID_LAYOUT_FIRST + (uint)i,
+                LayoutIcon.Name(layouts[i]));
+        if (layouts.Length > 0)
+            AppendMenuW(menu, MF_SEPARATOR, 0, null);
+        AppendMenuW(menu, MF_STRING | Chk(_enabled), ID_ENABLE, L10n.T("tray.enable"));
         AppendMenuW(menu, MF_STRING | Chk(s.AutoConvert), ID_AUTO, L10n.T("tray.auto"));
         AppendMenuW(menu, MF_STRING, ID_SETTINGS, L10n.T("tray.settings"));
         AppendMenuW(menu, MF_STRING, ID_UPDATE, L10n.T("tray.update"));
@@ -186,14 +172,41 @@ internal sealed class TrayIcon : IDisposable
 
         GetCursorPos(out POINT pt);
         SetForegroundWindow(_hwnd); // so the menu dismisses correctly on outside click
-        TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.X, pt.Y, 0, _hwnd, IntPtr.Zero);
-        DestroyMenu(menu);
+        uint command;
+        _menuOpen = true;
+        try
+        {
+            command = TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.X, pt.Y, 0, _hwnd, IntPtr.Zero);
+            PostMessageW(_hwnd, 0, IntPtr.Zero, IntPtr.Zero); // WM_NULL lets the tray menu reopen normally.
+        }
+        finally
+        {
+            DestroyMenu(menu);
+            _menuOpen = false;
+        }
+
+        switch (command)
+        {
+            case ID_ENABLE: _enabled = !_enabled; EnabledChanged?.Invoke(_enabled); break;
+            case ID_SETTINGS: SettingsRequested?.Invoke(); break;
+            case ID_UPDATE: UpdateRequested?.Invoke(); break;
+            case ID_QUIT: QuitRequested?.Invoke(); PostQuitMessage(0); break;
+            case ID_AUTO: s.AutoConvert = !s.AutoConvert; s.Save(); break;
+            default:
+                if (target != IntPtr.Zero && command >= ID_LAYOUT_FIRST && command - ID_LAYOUT_FIRST < layouts.Length)
+                {
+                    SetForegroundWindow(target);
+                    LayoutSwitcher.SwitchTo(layouts[command - ID_LAYOUT_FIRST], target);
+                }
+                break;
+        }
     }
 
     private static uint Chk(bool on) => on ? MF_CHECKED : MF_UNCHECKED;
 
     public void Dispose()
     {
+        _layoutTimer.Dispose();
         if (_hwnd != IntPtr.Zero)
         {
             Shell_NotifyIconW(NIM_DELETE, ref _nid);

@@ -37,9 +37,10 @@ internal static class LayoutSwitcher
     }
 
     /// <summary>Switch the focused window to <paramref name="hkl"/>.</summary>
-    public static void SwitchTo(IntPtr hkl)
+    public static void SwitchTo(IntPtr hkl) => SwitchTo(hkl, GetForegroundWindow());
+
+    internal static void SwitchTo(IntPtr hkl, IntPtr hwnd)
     {
-        IntPtr hwnd = GetForegroundWindow();
         if (hwnd != IntPtr.Zero)
             PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl);
         Sound.Switch();   // issue #7: optional cue on layout change

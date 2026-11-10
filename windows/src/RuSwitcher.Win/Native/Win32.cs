@@ -240,6 +240,7 @@ internal static class Win32
 
     // --- Tray icon (Shell_NotifyIcon) + hidden message window ---
     public const uint NIM_ADD = 0x00000000;
+    public const uint NIM_MODIFY = 0x00000001;
     public const uint NIM_DELETE = 0x00000002;
     public const uint NIF_MESSAGE = 0x00000001;
     public const uint NIF_ICON = 0x00000002;
@@ -260,7 +261,6 @@ internal static class Win32
     public const uint MF_UNCHECKED = 0x00000000;
     public const uint MF_GRAYED = 0x00000001;
     public const uint MF_DISABLED = 0x00000002;
-    public const int IDI_APPLICATION = 32512;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct NOTIFYICONDATA
@@ -310,8 +310,12 @@ internal static class Win32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern uint RegisterWindowMessageW(string message);
+
     [DllImport("user32.dll")]
-    public static extern IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(IntPtr icon);
 
     [DllImport("user32.dll")]
     public static extern IntPtr CreatePopupMenu();

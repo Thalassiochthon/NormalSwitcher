@@ -18,6 +18,8 @@ internal static class Program
         using var instance = new Mutex(true, @"Local\NormalSwitcher.Windows", out bool firstInstance);
         if (!firstInstance) return;
 
+        ApplicationConfiguration.Initialize();
+
         string logDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NormalSwitcher");
         Directory.CreateDirectory(logDir);
@@ -121,7 +123,6 @@ internal static class Program
                 undoTarget = word.Target;
         };
         tray.EnabledChanged += on => { enabled = on; ResetInput(); Log($"enabled = {on}"); };
-        tray.TriggerChanged += kind => { detector.Kind = kind; Log($"trigger set: {kind}"); };  // Settings written by the tray
         tray.SettingsRequested += () =>
         {
             using var form = new UI.SettingsForm();
