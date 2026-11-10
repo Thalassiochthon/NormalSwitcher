@@ -14,7 +14,7 @@ internal sealed class SettingsForm : Form
     public event Action? AppearanceChanged;
     public event Action<bool>? KeyboardEnabledChanged;
 
-    public SettingsForm(ClipboardHistory history, GlobalShortcuts globalShortcuts, string logPath)
+    public SettingsForm(ClipboardHistory history, GlobalShortcuts globalShortcuts, string logPath, bool keyboardHookReady)
     {
         var s = Settings.Current;
         Text = L10n.T("settings.title");
@@ -116,6 +116,9 @@ internal sealed class SettingsForm : Form
             }
             else MessageBox.Show(this, L10n.T("settings.log.empty"), Text);
         };
+        var checkAccess = new Button { Text = L10n.T("settings.access.check"), AutoSize = true };
+        checkAccess.Click += (_, _) => MessageBox.Show(this,
+            L10n.T(keyboardHookReady ? "settings.access.ready" : "settings.access.failed"), Text);
         AddPage("advanced",
             Check("settings.tray.hide", s.HideTrayIcon, value => SetAppearance(() => s.HideTrayIcon = value)),
             Check("settings.tray.mono", s.MonochromeTray, value => SetAppearance(() => s.MonochromeTray = value)),
@@ -126,7 +129,7 @@ internal sealed class SettingsForm : Form
             Check("settings.updates", s.CheckUpdatesEnabled, value => { s.CheckUpdatesEnabled = value; s.Save(); }),
             Check("settings.remote", s.RemoteDesktopMode, value => { s.RemoteDesktopMode = value; s.Save(); }),
             Check("settings.log.enable", s.DebugLogging, value => { s.DebugLogging = value; s.Save(); }),
-            openLog);
+            checkAccess, openLog);
 
         AddPage("about",
             new Label { Text = $"NormalSwitcher {Updater.Current.ToString(3)}", AutoSize = true },

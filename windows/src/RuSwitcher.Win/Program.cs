@@ -31,8 +31,10 @@ internal static class Program
         string logPath = Path.Combine(logDir, "debug.log");
         void Log(string line)
         {
-            if (Settings.Current.DebugLogging)
-                File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+            if (!Settings.Current.DebugLogging) return;
+            try { File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}"); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         // Capture crashes to the log instead of dying silently (a tester can then send debug.log).
@@ -168,11 +170,12 @@ internal static class Program
             }
         };
         tray.EnabledChanged += on => { enabled = on; ResetInput(); Log($"enabled = {on}"); };
+        bool keyboardHookReady = false;
         UI.SettingsForm? currentSettings = null;
         tray.SettingsRequested += () =>
         {
             if (currentSettings != null) { currentSettings.Activate(); return; }
-            using var form = new UI.SettingsForm(tray.ClipboardHistory, tray.Shortcuts, logPath);
+            using var form = new UI.SettingsForm(tray.ClipboardHistory, tray.Shortcuts, logPath, keyboardHookReady);
             currentSettings = form;
             form.AppearanceChanged += tray.RefreshAppearance;
             form.KeyboardEnabledChanged += tray.SetEnabled;
@@ -317,7 +320,12 @@ internal static class Program
             switchDetector.OnKeyUp(vk);
             if (tray.Shortcuts.HasPending) tray.PostShortcutPoll();
         };
-        hook.Install();
+        try { hook.Install(); keyboardHookReady = true; }
+        catch (InvalidOperationException error)
+        {
+            hook.Dispose();
+            Log(error.Message);
+        }
 
         // Per-app layout memory (issue): restores each app's last-used layout on focus. Off by default.
         using var appTracker = new AppLayoutTracker();
@@ -325,7 +333,7 @@ internal static class Program
 
         Updater.CheckOnLaunch(ui);   // silent, throttled once-a-day, off the startup path
 
-        Log($"NormalSwitcher started — hook + tray up, trigger={settings.Trigger}");
+        Log($"NormalSwitcher started — keyboard hook={keyboardHookReady}, trigger={settings.Trigger}");
 
         // Message loop: required for both the LL hook callbacks and the tray window.
         while (GetMessageW(out MSG msg, IntPtr.Zero, 0, 0) > 0)

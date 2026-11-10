@@ -17,11 +17,16 @@ The dictionary checks run on your device. The preview leaves automatic update ch
   gibberish (dictionary-driven).
 - **Trailing punctuation** kept literally (issue #15) — `ghbdtn,` → `привет,`.
 - **As-you-type auto conversion** (beta, off by default) — flips a word right after Space when the
-  dictionary is confident it was typed in the wrong layout. This preview applies automatic edits only
-  to supported native text fields where the caret and original text can be verified. A later keypress
+  dictionary is confident it was typed in the wrong layout. Automatic edits require a verifiable
+  caret and original text. Enter and Tab can be enabled for writable native edit controls. A later keypress
   or mouse click cancels a pending edit. Reversing an auto-conversion teaches a "never convert"
   exception.
 - **Exception lists** — never-convert / always-convert, editable in Settings → Auto-correction → Exceptions.
+- **Text replacements and corrections** — saved abbreviations, two initial capitals, numeric
+  separators, and clear neighboring-key typos. The optional embedded English and Russian
+  [word lists](../dicts/LICENSE) are provided by FrequencyWords under CC BY-SA 4.0.
+- **Configurable shortcuts** — correction, layout switching and direct layout selection, case
+  changes, word exclusions, and clipboard history.
 - **Layout-switch hotkey** (issue #14) — a separate hotkey that only switches the layout.
 - **Per-app layout memory** — remembers and restores each application's last-used layout.
 - **Layout indicator** — shows the focused app’s flag or language code in the tray. Choose a layout

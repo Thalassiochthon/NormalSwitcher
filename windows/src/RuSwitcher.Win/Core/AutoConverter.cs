@@ -39,6 +39,15 @@ internal static class AutoConverter
         if (settings.NeverConvert.Contains(lower)) return false;
 
         var targets = LayoutSwitcher.ConversionTargets(sourceHkl).ToArray();
+        if (settings.Abbreviations.Count > 0)
+        {
+            string[] expansions = targets.Select(layout => KeyMapper.ConvertWord(keys, sourceHkl, layout).ToLowerInvariant())
+                .Where(settings.Abbreviations.ContainsKey).Select(key => settings.Abbreviations[key])
+                .Where(value => !string.IsNullOrEmpty(value)).Distinct().Take(2).ToArray();
+            if (expansions.Length == 1) return await Replace(expansions[0], input.Layout, learn: false);
+            if (expansions.Length > 1) return false;
+        }
+
         IntPtr targetHkl = IntPtr.Zero;
         string? converted = null;
         if (settings.AutoConvert)
@@ -48,14 +57,15 @@ internal static class AutoConverter
                 string candidate = KeyMapper.ConvertWord(keys, sourceHkl, layout);
                 if (candidate.Length != keys.Count || candidate == typed) continue;
                 string targetTag = SmartConvert.LangTag(layout);
-                if (!ShouldConvertPure(typed, candidate, srcTag, targetTag, caps, Dict.Available,
-                    Dict.CheckWord, settings.NeverConvert, settings.AlwaysConvert, CheckTarget))
-                    continue;
+                string? plan = PreservePunctuation(typed, candidate,
+                    (before, after) => ShouldConvertPure(before, after, srcTag, targetTag, caps, Dict.Available,
+                        Dict.CheckWord, settings.NeverConvert, settings.AlwaysConvert, CheckTarget));
+                if (plan == null) continue;
                 if (converted != null) return false; // More than one plausible destination.
                 targetHkl = layout;
                 converted = settings.FixTwoCaps && !caps
-                    ? TextFixes.TwoCaps(candidate, word => CheckTarget(word, targetTag) == true) ?? candidate
-                    : candidate;
+                    ? TextFixes.TwoCaps(plan, word => CheckTarget(word, targetTag) == true) ?? plan
+                    : plan;
             }
         }
         if (converted != null) return await Replace(converted, targetHkl, learn: true);
@@ -89,6 +99,18 @@ internal static class AutoConverter
         }
     }
 
+    internal static string? PreservePunctuation(string typed, string candidate, Func<string, string, bool> shouldConvert)
+    {
+        int end = typed.Length;
+        while (end > 0 && ".,!?;:)".Contains(typed[end - 1])) end--;
+        if (end == 0) return null;
+        bool whole = shouldConvert(typed, candidate);
+        if (end == typed.Length) return whole ? candidate : null;
+        bool withPunctuation = shouldConvert(typed[..end], candidate[..end]);
+        if (whole == withPunctuation) return null;
+        return whole ? candidate : candidate[..end] + typed[end..];
+    }
+
     private static bool IsHebrew(string tag) => tag == "he" || tag.StartsWith("he-", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The verdict logic, ported from the macOS <c>LayoutDetector.decide</c>. Pure: the
@@ -106,13 +128,17 @@ internal static class AutoConverter
         if (always.Contains(convertedLc)) return true;
 
         // --- soft vetoes (cheap, before the dictionary) ---
-        if (typed.Length < 3) return false;                 // 1–2 letters: too many cross-layout collisions
-        if (!typed.All(char.IsLetter)) return false;        // digits / punctuation / URL / code / email
+        if (typed.Length < 2 || !converted.All(char.IsLetter)
+            || !typed.All(ch => char.IsLetter(ch) || "`[];',.".Contains(ch)))
+            return false;
         if (!caps)                                          // under Caps Lock these two aren't acronyms/camelCase
         {
             if (IsAllCaps(typed)) return false;             // acronyms
             if (LooksLikeCode(typed)) return false;         // camelCase / mixed scripts
         }
+
+        if (typed.Length == 2)
+            return ShortWords.Contains(convertedLc, tgtTag) && !ShortWords.Contains(typedLc, srcTag);
 
         // --- Hebrew cross-script pairs (positive signal only, from the non-Hebrew side) ---
         bool srcHe = IsHebrew(srcTag);
@@ -135,7 +161,8 @@ internal static class AutoConverter
 
         // --- common same-alphabet-swap case ---
         if (!dictAvailable) return false;
-        return (checkTarget ?? checkWord)(convertedLc, tgtTag) == true && checkWord(typedLc, srcTag) == false;
+        if ((checkTarget ?? checkWord)(convertedLc, tgtTag) != true) return false;
+        return !typed.All(ch => char.IsLetter(ch) || ch == '\'') || checkWord(typedLc, srcTag) == false;
     }
 
     private static bool IsAllCaps(string s) =>

@@ -75,6 +75,21 @@ public class AutoConverterTests
     }
 
     [Fact]
+    public void Converts_known_short_words_but_leaves_collisions_alone()
+    {
+        Assert.True(AutoConverter.ShouldConvertPure("yt", "не", "en-US", "ru-RU", false, true, Dict(), None, None));
+        Assert.False(AutoConverter.ShouldConvertPure("vs", "мы", "en-US", "ru-RU", false, true, Dict(), None, None));
+    }
+
+    [Fact]
+    public void Preserves_terminal_punctuation_only_when_the_intent_is_clear()
+    {
+        Assert.Equal("привет,", AutoConverter.PreservePunctuation("ghbdtn,", "приветб",
+            (_, candidate) => candidate == "привет"));
+        Assert.Null(AutoConverter.PreservePunctuation("ghbdtn,", "приветб", (_, _) => true));
+    }
+
+    [Fact]
     public void Keeps_tokens_with_non_letters()
     {
         // digits / punctuation → URL/code/email territory, never auto-convert.
