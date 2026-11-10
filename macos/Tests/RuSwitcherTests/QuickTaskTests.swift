@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Darwin
 import Testing
 @testable import RuSwitcher
 
@@ -132,4 +133,21 @@ struct QuickTaskTests {
             #expect(model.tasks == [next, initial])
         }
     }
+    @Test func busyWriterFailsWithoutBlockingInput() throws {
+        try withStore { url, _, store in
+            let model = QuickTasks(store: store)
+            let initial = QuickTask(text: "Saved")
+            #expect(model.add(initial))
+            let descriptor = open(url.appendingPathExtension("lock").path, O_RDWR)
+            #expect(descriptor >= 0)
+            guard descriptor >= 0 else { return }
+            defer { close(descriptor) }
+            #expect(flock(descriptor, LOCK_EX | LOCK_NB) == 0)
+            defer { flock(descriptor, LOCK_UN) }
+            #expect(!model.add(QuickTask(text: "Busy")))
+            #expect(model.tasks == [initial])
+            #expect(model.errorMessage != nil)
+        }
+    }
+
 }

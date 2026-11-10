@@ -61,7 +61,7 @@ final class QuickTaskStore {
         let lock = open(file.appendingPathExtension("lock").path, O_CREAT | O_RDWR, mode_t(0o600))
         guard lock >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         defer { close(lock) }
-        guard flock(lock, LOCK_EX) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         defer { flock(lock, LOCK_UN) }
 
         let current: Data?
