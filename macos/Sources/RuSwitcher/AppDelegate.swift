@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let keyboardMonitor = KeyboardMonitor()
     private let textConverter = TextConverter()
     private lazy var clipboardHistory = ClipboardHistory(converter: textConverter, keyboardMonitor: keyboardMonitor)
+    private let quickTasks = QuickTasks()
     private let settingsController = SettingsWindowController()
     private let perAppLayoutManager = PerAppLayoutManager()
     private var permissionCheckTimer: Timer?
@@ -26,6 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         startedAsLoginItem = Self.launchedAsLoginItem()   // Apple-событие запуска доступно только сейчас
         clipboardHistory.configure()
+        clipboardHistory.onAddTask = { [weak self] in self?.quickTasks.addFromClipboard($0) }
+        quickTasks.readClipboard = { [weak self] in self?.clipboardHistory.currentText() }
+        quickTasks.start()
         setupStatusItem()
         setupSettingsCallbacks()
         syncLoginItem()
@@ -129,6 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.onClipboardHistoryPersistenceChanged = { [weak self] in
             guard let self, !self.clipboardHistory.updatePersistence() else { return }
             self.clipboardHistory.showStorageError()
+        }
+        settingsController.taskShortcutAvailable = { [weak self] in self?.quickTasks.isAvailable($0) == true }
+        settingsController.onTaskShortcutChanged = { [weak self] action, shortcut in
+            self?.quickTasks.changeShortcut(action, to: shortcut) == true
         }
         settingsController.onClipboardHistoryShortcutChanged = { [weak self] shortcut in
             guard let self else { return false }
@@ -1005,8 +1013,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 history.keyEquivalentModifierMask = shortcut.menuModifierFlags
             }
             menu.addItem(history)
-            menu.addItem(.separator())
         }
+
+        let tasks = NSMenuItem(title: taskText("Tasks…", "Задачи…"),
+                               action: #selector(openQuickTasks), keyEquivalent: "")
+        tasks.target = self
+        menu.addItem(tasks)
+        menu.addItem(.separator())
 
         for item in layoutMenuItems() { menu.addItem(item) }
         menu.addItem(.separator())
@@ -1075,7 +1088,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenuPasteTarget = NSWorkspace.shared.frontmostApplication
         menu.item(withTag: Self.permissionsItemTag)?.isHidden = permissionsGranted
         menu.item(withTag: Self.updateItemTag)?.title = UpdateChecker.menuTitle
-        let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 2 : 0)
+        let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 3 : 2)
         for old in menu.items where old.tag == Self.layoutItemTag { menu.removeItem(old) }
         for (offset, item) in layoutMenuItems().enumerated() {
             menu.insertItem(item, at: insertAt + offset)
@@ -1289,6 +1302,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.showWindow()
     }
 
+    @objc private func openQuickTasks() {
+        DispatchQueue.main.async { [weak self] in self?.quickTasks.show() }
+    }
+
     @objc private func openClipboardHistory() {
         let target = statusMenuPasteTarget
         DispatchQueue.main.async { [weak self] in self?.clipboardHistory.show(for: target) }
@@ -1424,6 +1441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         iconRefreshTimer?.invalidate()
         clipboardHistory.stop()
+        quickTasks.stop()
         // Не теряем буфер обмена в 2-секундном окне отложенного восстановления
         // (актуально и при само-обновлении, которое завершает процесс).
         textConverter.flushPendingClipboardRestore()

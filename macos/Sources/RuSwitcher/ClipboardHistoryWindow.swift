@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private let entries: [String]
+    private let onAddTask: ((String) -> Void)?
     private let onPaste: (String) -> Void
     private var results: [String]
     private let search = NSSearchField()
@@ -10,10 +11,13 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
     private let emptyLabel = NSTextField(labelWithString: L10n.clipboardHistoryNoMatches)
     private let pasteButton = NSButton(title: L10n.clipboardHistoryPaste, target: nil, action: nil)
 
-    init(entries: [String], onPaste: @escaping (String) -> Void) {
+    private let taskButton = NSButton(title: taskText("Add to Tasks", "В задачи"), target: nil, action: nil)
+
+    init(entries: [String], onAddTask: ((String) -> Void)?, onPaste: @escaping (String) -> Void) {
         self.entries = entries
         self.results = entries
         self.onPaste = onPaste
+        self.onAddTask = onAddTask
         let panel = ClipboardHistoryPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360),
                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         super.init(window: panel)
@@ -55,7 +59,10 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
         pasteButton.target = self
         pasteButton.action = #selector(pasteSelected)
         pasteButton.keyEquivalent = "\r"
-        let actions = NSStackView(views: [emptyLabel, NSView(), pasteButton])
+        taskButton.target = self
+        taskButton.action = #selector(addSelectedToTasks)
+        taskButton.isHidden = onAddTask == nil
+        let actions = NSStackView(views: [emptyLabel, NSView(), taskButton, pasteButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 8
@@ -92,7 +99,7 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        pasteButton.isEnabled = results.indices.contains(table.selectedRow)
+        updateActions()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -120,7 +127,18 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
             table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             table.scrollRowToVisible(0)
         }
-        pasteButton.isEnabled = !results.isEmpty
+        updateActions()
+    }
+
+    private func updateActions() {
+        let row = table.selectedRow
+        pasteButton.isEnabled = results.indices.contains(row)
+        taskButton.isEnabled = pasteButton.isEnabled && !results[row].allSatisfy(\.isWhitespace)
+    }
+
+    @objc private func addSelectedToTasks() {
+        let row = table.selectedRow
+        if results.indices.contains(row) { onAddTask?(results[row]) }
     }
 
     @objc private func pasteDoubleClick() {

@@ -40,7 +40,7 @@ struct ClipboardHistoryShortcut: Codable, Equatable {
                   key: scalar == " " ? "Space" : key.uppercased())
     }
 
-    private init(keyCode: UInt32, modifiers: UInt32, key: String) {
+    init(keyCode: UInt32, modifiers: UInt32, key: String) {
         self.keyCode = keyCode
         self.modifiers = modifiers
         self.key = key
@@ -73,6 +73,8 @@ final class ClipboardHistory {
         let text: String
         let target: NSRunningApplication?
     }
+
+    var onAddTask: ((String) -> Void)?
 
     var shortcutAvailable: Bool { hotkey != nil }
 
@@ -125,20 +127,25 @@ final class ClipboardHistory {
         let observedCount = pasteboard.changeCount
         guard observedCount != changeCount else { return }
         changeCount = observedCount
-        // Secure Input applies to key monitoring, not an explicit copy to the pasteboard.
+        guard let text = currentText(maxBytes: Self.maxTextBytes), entries.first != text else { return }
+        entries.removeAll { $0 == text }
+        entries.insert(text, at: 0)
+        if entries.count > Self.limit { entries.removeLast() }
+        if SettingsManager.shared.clipboardHistoryPersistent { _ = save() }
+    }
+
+    func currentText(maxBytes: Int? = nil) -> String? {
+        let version = pasteboard.changeCount
         guard !converter.hasTemporaryClipboardContents,
               let items = pasteboard.pasteboardItems, items.count == 1,
               let item = items.first,
               Self.ignoredTypes.allSatisfy({ !item.types.contains($0) }),
               !item.types.contains(.fileURL),
               let text = item.string(forType: .string),
-              !text.isEmpty, text.utf8.count <= Self.maxTextBytes,
-              pasteboard.changeCount == observedCount,
-              entries.first != text else { return }
-        entries.removeAll { $0 == text }
-        entries.insert(text, at: 0)
-        if entries.count > Self.limit { entries.removeLast() }
-        if SettingsManager.shared.clipboardHistoryPersistent { _ = save() }
+              !text.isEmpty,
+              maxBytes.map({ text.utf8.count <= $0 }) ?? true,
+              pasteboard.changeCount == version else { return nil }
+        return text
     }
 
     func show(for target: NSRunningApplication?) {
@@ -204,7 +211,7 @@ final class ClipboardHistory {
         DispatchQueue.main.async { [weak self] in
             guard let self, SettingsManager.shared.clipboardHistoryEnabled else { return }
             self.capture()
-            let browser = ClipboardHistoryWindow(entries: self.entries) { [weak self] text in
+            let browser = ClipboardHistoryWindow(entries: self.entries, onAddTask: self.onAddTask) { [weak self] text in
                 target?.activate(options: [])
                 self?.paste(text, into: target)
             }
