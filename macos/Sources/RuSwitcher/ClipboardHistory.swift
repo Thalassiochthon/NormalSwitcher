@@ -49,9 +49,8 @@ struct ClipboardHistoryShortcut: Codable, Equatable {
 
 @MainActor
 final class ClipboardHistory {
-    static let limit = 30
-    private static let quickLimit = 8
-    private static let maxTextBytes = 32 * 1024
+    static let limit = ClipboardHistoryStore.limit
+    private static let maxTextBytes = ClipboardHistoryStore.maxTextBytes
     private static let shortcutID = EventHotKeyID(signature: 0x4E534348, id: 1) // NSCH
     private static let ignoredTypes = [
         NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
@@ -62,17 +61,14 @@ final class ClipboardHistory {
     private let pasteboard = NSPasteboard.general
     private let converter: TextConverter
     private let keyboardMonitor: KeyboardMonitor
-    private var entries: [String] = []
+    private let model = ClipboardHistoryModel()
+    private var entries: [String] { model.entries }
     private var changeCount = 0
     private var timer: Timer?
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
-    private var menuOpen = false
     private var historyWindow: ClipboardHistoryWindow?
-    private struct EntryChoice {
-        let text: String
-        let target: NSRunningApplication?
-    }
+    private var pasteTarget: NSRunningApplication?
 
     var onAddTask: ((String) -> Void)?
 
@@ -88,7 +84,7 @@ final class ClipboardHistory {
         let settings = SettingsManager.shared
         if settings.clipboardHistoryEnabled {
             guard timer == nil else { return true }
-            if settings.clipboardHistoryPersistent { load() }
+            let restored = model.setPersistent(settings.clipboardHistoryPersistent)
             changeCount = pasteboard.changeCount
             let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.capture() }
@@ -96,7 +92,7 @@ final class ClipboardHistory {
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
             _ = registerShortcut(settings.clipboardHistoryShortcut)
-            return true
+            return restored
         } else {
             stop()
             return clear()
@@ -116,11 +112,10 @@ final class ClipboardHistory {
 
     @discardableResult
     func updatePersistence() -> Bool {
-        if SettingsManager.shared.clipboardHistoryEnabled,
-           SettingsManager.shared.clipboardHistoryPersistent {
-            return save()
-        }
-        return removeSavedHistory()
+        let result = model.setPersistent(SettingsManager.shared.clipboardHistoryEnabled &&
+                                         SettingsManager.shared.clipboardHistoryPersistent)
+        historyWindow?.update(entries: entries, storageFailed: model.storageFailed)
+        return result
     }
 
     private func capture() {
@@ -128,10 +123,8 @@ final class ClipboardHistory {
         guard observedCount != changeCount else { return }
         changeCount = observedCount
         guard let text = currentText(maxBytes: Self.maxTextBytes), entries.first != text else { return }
-        entries.removeAll { $0 == text }
-        entries.insert(text, at: 0)
-        if entries.count > Self.limit { entries.removeLast() }
-        if SettingsManager.shared.clipboardHistoryPersistent { _ = save() }
+        model.capture(text)
+        historyWindow?.update(entries: entries, storageFailed: model.storageFailed)
     }
 
     func currentText(maxBytes: Int? = nil) -> String? {
@@ -149,54 +142,40 @@ final class ClipboardHistory {
     }
 
     func show(for target: NSRunningApplication?) {
-        guard SettingsManager.shared.clipboardHistoryEnabled, !menuOpen, NSApp.modalWindow == nil else { return }
+        guard SettingsManager.shared.clipboardHistoryEnabled, NSApp.modalWindow == nil else { return }
+        if target?.processIdentifier != ProcessInfo.processInfo.processIdentifier { pasteTarget = target }
+        capture()
         if let window = historyWindow?.window, window.isVisible {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        capture()
-        let menu = NSMenu(title: L10n.clipboardHistoryTitle)
-        if entries.isEmpty {
-            let message: String
-            if #available(macOS 15.4, *), pasteboard.accessBehavior == .alwaysDeny {
-                message = L10n.clipboardHistoryAccessDenied
-            } else {
-                message = L10n.clipboardHistoryEmpty
-            }
-            menu.addItem(withTitle: message, action: nil, keyEquivalent: "")
+        let emptyMessage: String
+        if #available(macOS 15.4, *), pasteboard.accessBehavior == .alwaysDeny {
+            emptyMessage = L10n.clipboardHistoryAccessDenied
         } else {
-            for text in entries.prefix(Self.quickLimit) {
-                let item = menu.addItem(withTitle: Self.menuPreview(text),
-                                        action: #selector(selectEntry(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = EntryChoice(text: text, target: target)
+            emptyMessage = L10n.clipboardHistoryEmpty
+        }
+        let browser = ClipboardHistoryWindow(entries: entries, storageFailed: model.storageFailed,
+                                              emptyMessage: emptyMessage, onAddTask: onAddTask,
+                                              onRetry: { [weak self] in
+            guard let self else { return }
+            _ = self.model.retry()
+            self.historyWindow?.update(entries: self.entries, storageFailed: self.model.storageFailed)
+        }, onClear: { [weak self] in
+            guard let self else { return }
+            if !self.clear() {
+                self.historyWindow?.update(entries: self.entries, storageFailed: true)
             }
-            menu.addItem(.separator())
-            let all = menu.addItem(withTitle: L10n.clipboardHistoryAll,
-                                   action: #selector(openFullHistory(_:)), keyEquivalent: "")
-            all.target = self
-            all.representedObject = target
-            let clearItem = menu.addItem(withTitle: L10n.clipboardHistoryClear,
-                                         action: #selector(clearFromMenu), keyEquivalent: "")
-            clearItem.target = self
+        }) { [weak self] text in
+            guard let self else { return }
+            let target = self.pasteTarget
+            target?.activate(options: [])
+            self.paste(text, into: target)
         }
-
-        menuOpen = true
-        menu.popUp(positioning: entries.isEmpty ? nil : menu.items.first,
-                   at: NSEvent.mouseLocation, in: nil)
-        menuOpen = false
-    }
-
-    private static func menuPreview(_ text: String) -> String {
-        let preview = preview(text, limit: 52)
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.menuFont(ofSize: 0)]
-        guard (preview as NSString).size(withAttributes: attributes).width > 360 else { return preview }
-        var prefix = preview[...]
-        while !prefix.isEmpty, ((String(prefix) + "…") as NSString).size(withAttributes: attributes).width > 360 {
-            prefix = prefix.dropLast()
-        }
-        return String(prefix) + "…"
+        historyWindow = browser
+        browser.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     static func preview(_ text: String, limit: Int) -> String {
@@ -206,37 +185,12 @@ final class ClipboardHistory {
         return prefix.count > limit ? line + "…" : line
     }
 
-    @objc private func openFullHistory(_ sender: NSMenuItem) {
-        let target = sender.representedObject as? NSRunningApplication
-        DispatchQueue.main.async { [weak self] in
-            guard let self, SettingsManager.shared.clipboardHistoryEnabled else { return }
-            self.capture()
-            let browser = ClipboardHistoryWindow(entries: self.entries, onAddTask: self.onAddTask) { [weak self] text in
-                target?.activate(options: [])
-                self?.paste(text, into: target)
-            }
-            self.historyWindow = browser
-            browser.showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
-    }
-
-    @objc private func selectEntry(_ sender: NSMenuItem) {
-        guard let choice = sender.representedObject as? EntryChoice else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.paste(choice.text, into: choice.target)
-        }
-    }
-
-    @objc private func clearFromMenu() {
-        if !clear() { showStorageError() }
-    }
-
     @discardableResult
     private func clear() -> Bool {
-        entries.removeAll()
+        guard model.clear() else { return false }
         changeCount = pasteboard.changeCount
-        return removeSavedHistory()
+        historyWindow?.close()
+        return true
     }
 
     private func paste(_ text: String, into target: NSRunningApplication?) {
@@ -253,7 +207,7 @@ final class ClipboardHistory {
     }
 
     private func deliverPaste(to target: NSRunningApplication, clipboardVersion: Int, attemptsLeft: Int) {
-        guard SettingsManager.shared.clipboardHistoryEnabled, !menuOpen, !target.isTerminated,
+        guard SettingsManager.shared.clipboardHistoryEnabled, !target.isTerminated,
               pasteboard.changeCount == clipboardVersion, !converter.hasTemporaryClipboardContents else { return }
 
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -263,7 +217,7 @@ final class ClipboardHistory {
             return
         }
 
-        // Menu tracking can keep focus briefly after the item action. Wait only while no
+        // Closing our panel can keep focus briefly after the action. Wait only while no
         // other app has taken focus, and never redirect a paste to a different app.
         guard attemptsLeft > 0, frontPID == nil || frontPID == ProcessInfo.processInfo.processIdentifier else {
             rslog("Clipboard history: entry copied; automatic paste skipped (focus or secure input)")
@@ -317,51 +271,12 @@ final class ClipboardHistory {
         }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler) == noErr
     }
 
-    private var storageURL: URL {
-        URL.applicationSupportDirectory.appendingPathComponent("NormalSwitcher", isDirectory: true)
-            .appendingPathComponent("ClipboardHistory", isDirectory: true)
-            .appendingPathComponent("entries.json")
-    }
-
-    private func load() {
-        guard let data = try? Data(contentsOf: storageURL),
-              let saved = try? JSONDecoder().decode([String].self, from: data) else { return }
-        entries = Array(saved.lazy.filter { !$0.isEmpty && $0.utf8.count <= Self.maxTextBytes }
-            .prefix(Self.limit))
-    }
-
-    private func save() -> Bool {
-        do {
-            let url = storageURL
-            let directory = url.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: directory,
-                                                    withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
-            try JSONEncoder().encode(entries).write(to: url, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            return true
-        } catch {
-            rslog("Clipboard history could not be saved")
-            return false
-        }
-    }
-
-    private func removeSavedHistory() -> Bool {
-        do {
-            try FileManager.default.removeItem(at: storageURL)
-            return true
-        } catch let error as CocoaError where error.code == .fileNoSuchFile {
-            return true
-        } catch {
-            rslog("Clipboard history could not be removed")
-            return false
-        }
-    }
-
     func showStorageError() {
         let alert = NSAlert()
         alert.messageText = L10n.clipboardHistoryStorageError
+        alert.informativeText = taskText(
+            "Check storage and Keychain access, then repeat the action in Settings or choose Retry in clipboard history. New entries are kept in memory until they can be saved.",
+            "Проверьте доступ к хранилищу и Связке ключей. Повторите действие в настройках или нажмите «Повторить» в истории буфера. До успешного сохранения новые записи остаются в памяти.")
         alert.runModal()
     }
 }

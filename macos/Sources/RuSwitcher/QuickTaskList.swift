@@ -50,34 +50,50 @@ struct QuickTaskList: View {
                     .buttonStyle(.borderless)
                     .accessibilityLabel(task.completed ? taskText("Reopen", "Вернуть в активные") :
                         taskText("Complete", "Завершить"))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(task.title).lineLimit(1)
-                        if task.text != task.title, !task.text.isEmpty {
-                            Text(String(task.text.prefix(160)))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer(minLength: 4)
                     Button {
-                        editingIsNew = false
-                        editing = task
+                        open(task)
                     } label: {
-                        Image(systemName: "pencil")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(task.title).lineLimit(1)
+                            if !task.detailPreview.isEmpty {
+                                Text(task.detailPreview)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(taskText("Open task", "Открыть задачу"))
+                    .buttonStyle(.plain)
+                    .help(taskText("Open task", "Открыть задачу"))
                 }
                 .tag(task.id)
             }
             .overlay {
                 if visibleTasks.isEmpty && model.errorMessage == nil {
-                    Text(query.isEmpty ? taskText("No tasks here yet", "Здесь пока нет задач") :
-                        taskText("No matching tasks", "Ничего не найдено"))
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
+                    VStack(spacing: 6) {
+                        Text(query.isEmpty ? (completed ? taskText("No completed tasks", "Нет выполненных задач") :
+                            taskText("No tasks yet", "Пока нет задач")) : taskText("No matching tasks", "Ничего не найдено"))
+                        if query.isEmpty && !completed {
+                            Text(taskText("Copy text, then choose Add to Tasks in clipboard history. Or create a new task here.",
+                                          "Скопируйте текст и нажмите «В задачи» в истории буфера. Или создайте новую задачу здесь."))
+                                .font(.caption).multilineTextAlignment(.center).frame(maxWidth: 300)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .allowsHitTesting(false)
                 }
+            }
+            HStack {
+                Text(taskText("Click a task to edit", "Нажмите на задачу, чтобы изменить её"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(taskText("Open", "Открыть")) {
+                    if let task = visibleTasks.first(where: { $0.id == selection }) { open(task) }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!visibleTasks.contains(where: { $0.id == selection }))
             }
         }
         .padding(14)
@@ -91,6 +107,12 @@ struct QuickTaskList: View {
                 editing = nil
             }
         }
+    }
+
+    private func open(_ task: QuickTask) {
+        selection = task.id
+        editingIsNew = false
+        editing = task
     }
 }
 

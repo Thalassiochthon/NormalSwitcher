@@ -21,6 +21,11 @@ enum TaskShortcut: UInt32, CaseIterable {
 
     private var preferenceKey: String { "com.antonjas.normalswitcher.tasks.shortcut.\(rawValue)" }
 
+    var enabled: Bool {
+        get { UserDefaults.standard.object(forKey: preferenceKey + ".enabled") as? Bool ?? true }
+        nonmutating set { UserDefaults.standard.set(newValue, forKey: preferenceKey + ".enabled") }
+    }
+
     var shortcut: ClipboardHistoryShortcut {
         guard let data = UserDefaults.standard.data(forKey: preferenceKey),
               let saved = try? JSONDecoder().decode(ClipboardHistoryShortcut.self, from: data) else { return standard }
@@ -65,7 +70,7 @@ final class QuickTasks: ObservableObject {
                                            MemoryLayout<EventHotKeyID>.size, nil, &id)
             return MainActor.assumeIsolated {
                 guard status == noErr, id.signature == QuickTasks.signature,
-                      let action = TaskShortcut(rawValue: id.id) else { return OSStatus(eventNotHandledErr) }
+                      let action = TaskShortcut(rawValue: id.id), action.enabled else { return OSStatus(eventNotHandledErr) }
                 let tasks = Unmanaged<QuickTasks>.fromOpaque(context).takeUnretainedValue()
                 DispatchQueue.main.async {
                     switch action {
@@ -77,7 +82,7 @@ final class QuickTasks: ObservableObject {
             }
         }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler)
         guard status == noErr else { return }
-        for action in TaskShortcut.allCases { _ = register(action, shortcut: action.shortcut) }
+        for action in TaskShortcut.allCases where action.enabled { _ = register(action, shortcut: action.shortcut) }
     }
 
     func stop() {
@@ -94,6 +99,10 @@ final class QuickTasks: ObservableObject {
         // Leave standard macOS editing and application shortcuts available.
         let modifiers = shortcut.menuModifierFlags
         guard modifiers.contains(.control) || modifiers.contains(.option) else { return false }
+        if !action.enabled {
+            action.save(shortcut)
+            return true
+        }
         if shortcut.keyCode == action.shortcut.keyCode, shortcut.modifiers == action.shortcut.modifiers,
            hotkeys[action] != nil { return true }
         if let old = hotkeys.removeValue(forKey: action) { UnregisterEventHotKey(old) }
@@ -102,6 +111,16 @@ final class QuickTasks: ObservableObject {
             return false
         }
         action.save(shortcut)
+        return true
+    }
+
+    func setShortcutEnabled(_ action: TaskShortcut, to enabled: Bool) -> Bool {
+        if enabled {
+            guard hotkeys[action] != nil || register(action, shortcut: action.shortcut) else { return false }
+        } else if let ref = hotkeys.removeValue(forKey: action) {
+            UnregisterEventHotKey(ref)
+        }
+        action.enabled = enabled
         return true
     }
 

@@ -19,6 +19,7 @@ struct QuickTaskTests {
             #expect(try store.load().isEmpty)
             let task = QuickTask(text: "\n  \n  Купить кофе ☕️\nSecond line\n")
             #expect(task.title == "Купить кофе ☕️")
+            #expect(task.detailPreview == "Second line")
             try store.save([task])
             let raw = try Data(contentsOf: url)
             #expect(raw.range(of: Data("Купить кофе".utf8)) == nil)

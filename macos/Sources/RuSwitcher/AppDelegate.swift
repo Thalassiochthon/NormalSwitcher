@@ -136,8 +136,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         settingsController.taskShortcutAvailable = { [weak self] in self?.quickTasks.isAvailable($0) == true }
         settingsController.onTaskShortcutChanged = { [weak self] action, shortcut in
-            self?.quickTasks.changeShortcut(action, to: shortcut) == true
+            guard let self else { return false }
+            let changed = self.quickTasks.changeShortcut(action, to: shortcut)
+            self.rebuildMenu()
+            return changed
         }
+        settingsController.onTaskShortcutEnabled = { [weak self] action, enabled in
+            guard let self else { return false }
+            let changed = self.quickTasks.setShortcutEnabled(action, to: enabled)
+            self.rebuildMenu()
+            return changed
+        }
+        settingsController.onOpenTasks = { [weak self] in self?.quickTasks.show() }
         settingsController.onClipboardHistoryShortcutChanged = { [weak self] shortcut in
             guard let self else { return false }
             let changed = self.clipboardHistory.changeShortcut(shortcut)
@@ -1018,6 +1028,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let tasks = NSMenuItem(title: taskText("Tasks…", "Задачи…"),
                                action: #selector(openQuickTasks), keyEquivalent: "")
         tasks.target = self
+        if quickTasks.isAvailable(.open) {
+            let shortcut = TaskShortcut.open.shortcut
+            tasks.keyEquivalent = shortcut.menuKeyEquivalent
+            tasks.keyEquivalentModifierMask = shortcut.menuModifierFlags
+        }
         menu.addItem(tasks)
         menu.addItem(.separator())
 
@@ -1029,6 +1044,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoConvert.target = self
         autoConvert.state = SettingsManager.shared.autoConvert ? .on : .off
         menu.addItem(autoConvert)
+        let correctionStatus = NSMenuItem(title: automaticCorrectionStatus, action: nil, keyEquivalent: "")
+        correctionStatus.tag = Self.autoCorrectionStatusTag
+        correctionStatus.indentationLevel = 1
+        menu.addItem(correctionStatus)
         menu.addItem(.separator())
 
         let missing = NSMenuItem(title: L10n.menuCheckPermissions, action: #selector(recheckPermissions), keyEquivalent: "")
@@ -1061,6 +1080,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let layoutItemTag = 741
     private static let permissionsItemTag = 742
     private static let updateItemTag = 743
+    private static let autoCorrectionStatusTag = 744
+
+    private var automaticCorrectionStatus: String {
+        let settings = SettingsManager.shared
+        var state = AutoCorrectionStatus()
+        state.masterEnabled = settings.autoSwitchEnabled
+        state.enabled = settings.autoConvert
+        state.accessibility = AXIsProcessTrusted()
+        state.keyboard = keyboardMonitor.isTapEnabled
+        state.secureInput = AutoSwitchPolicy.secureInputActive
+        let app = NSWorkspace.shared.frontmostApplication
+        if AutoSwitchPolicy.isDeniedApp(app?.bundleIdentifier) {
+            state.excludedApp = app?.localizedName ?? taskText("current application", "текущее приложение")
+        }
+        state.remoteClient = AutoSwitchPolicy.shouldDeferToRemoteClient
+        if settings.wordEndOnSpace { state.triggers.append(taskText("Space", "пробел")) }
+        if settings.wordEndOnEnter { state.triggers.append("Enter") }
+        if settings.wordEndOnTab { state.triggers.append("Tab") }
+        state.warmedUp = Dict.didWarmUp
+        if let langs = LayoutSwitcher.currentAndOppositeLanguage(), langs.current != langs.opposite {
+            state.languagesKnown = true
+            // Hebrew uses its own detector; the other side still needs a dictionary.
+            let required = LayoutDetector.isHebrew(langs.opposite) ? langs.current : langs.opposite
+            if Dict.didWarmUp, !Dict.isAvailable(required) {
+                state.missingDictionary = Locale(identifier: L10n.languageCode)
+                    .localizedString(forLanguageCode: required) ?? required.uppercased()
+            }
+        }
+        return state.message
+    }
 
     /// Пункты списка раскладок: «флаг + локализованное имя», галочка на текущей.
     private func layoutMenuItems() -> [NSMenuItem] {
@@ -1088,6 +1137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenuPasteTarget = NSWorkspace.shared.frontmostApplication
         menu.item(withTag: Self.permissionsItemTag)?.isHidden = permissionsGranted
         menu.item(withTag: Self.updateItemTag)?.title = UpdateChecker.menuTitle
+        menu.item(withTag: Self.autoCorrectionStatusTag)?.title = automaticCorrectionStatus
         let insertAt = menu.items.firstIndex { $0.tag == Self.layoutItemTag } ?? (SettingsManager.shared.clipboardHistoryEnabled ? 3 : 2)
         for old in menu.items where old.tag == Self.layoutItemTag { menu.removeItem(old) }
         for (offset, item) in layoutMenuItems().enumerated() {
