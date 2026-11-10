@@ -1,8 +1,8 @@
 {
-  "version": "1.1.5",
-  "build": "75",
+  "version": "1.1.6",
+  "build": "76",
   "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.5",
-  "notes": "В быстром меню буфера обмена теперь восемь последних записей. Пункт «Вся история…» открывает полный список с поиском.\n\nThe clipboard menu now shows the eight most recent entries. All History opens the full, searchable list.\n",
-  "sha256": "000491d63d4b10934fe9d638e74afcabaf48ace0f4df6a67fd674290950a542e"
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.6",
+  "notes": "Восемь коротких звуков NormalSwitcher для смены раскладки и предпрослушивания. Звучание не зависит от системной звуковой схемы.\n\nEight short NormalSwitcher layout cues for switching and preview, independent of the system sound scheme.\n",
+  "sha256": "053c4011c15d9882c8bdf47ab91c02ac24cabf6b4f6023f00096c125635cf340"
 }
