@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.0",
-  "notes": "Обновление из приложения с перезапуском. Новые настройки, история буфера и горячие клавиши.\n\nIn-app updates with automatic restart. New settings, clipboard history and keyboard shortcuts.",
-  "sha256": "28b3574039c3a86e424f9ea98b45fe79289b483a89fdf6c03d9899b2a22b95e9"
+  "version": "0.2.1",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.1",
+  "notes": "NormalSwitcher for Windows 0.2.1",
+  "sha256": "8f795883f303160a89d28fdb1ded5dc061357cc2f86bd6093536d0e1f8c50216"
 }
