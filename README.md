@@ -29,7 +29,7 @@ You can record a different shortcut in the same settings tab. Enable **Keep hist
 ## RuSwitcher
 
 <p align="center">
-  <img src="macos/icon.png" width="128" alt="RuSwitcher icon">
+  <img src="macos/icon.png" width="128" alt="NormalSwitcher icon">
 </p>
 
 <p align="center">
