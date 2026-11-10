@@ -48,7 +48,7 @@ internal readonly record struct InputTarget(IntPtr Foreground, IntPtr Focus, Int
                 SMTO_ABORTIFHUNG, 20, out var selection) == IntPtr.Zero)
             return false;
         long packed = selection.ToInt64();
-        if (packed < 0) return false;
+        if (packed < 0 || packed == uint.MaxValue) return false;
         start = (int)(packed & 0xFFFF);
         end = (int)((packed >> 16) & 0xFFFF);
         var buffer = new StringBuilder(Math.Max(4096, end) + 1);
