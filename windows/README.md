@@ -1,6 +1,6 @@
 # NormalSwitcher for Windows
 
-**Status: preview 0.1.0.** A Windows tray application based on [RuSwitcher](https://github.com/rashn/RuSwitcher).
+**Status: preview.** A Windows tray application based on [RuSwitcher](https://github.com/rashn/RuSwitcher).
 The portable x64 build includes the .NET runtime. Extract the archive, run `NormalSwitcher.exe`,
 then use the tray icon for settings or to quit. Add both keyboard layouts in Windows and tap
 **Ctrl twice** to correct the last word or the selected text.
@@ -21,10 +21,13 @@ The dictionary checks run on your device. The preview leaves automatic update ch
   to supported native text fields where the caret and original text can be verified. A later keypress
   or mouse click cancels a pending edit. Reversing an auto-conversion teaches a "never convert"
   exception.
-- **Exception lists** — never-convert / always-convert, editable in Settings → Exceptions.
+- **Exception lists** — never-convert / always-convert, editable in Settings → Auto-correction → Exceptions.
 - **Layout-switch hotkey** (issue #14) — a separate hotkey that only switches the layout.
 - **Per-app layout memory** — remembers and restores each application's last-used layout.
-- **Layout sound** (issue #7) and a **layout indicator** in the tray menu.
+- **Layout indicator** — shows the focused app’s flag or language code in the tray. Choose a layout
+  from the menu, or set a preferred pair for conversion in Settings → General.
+- **Clipboard history** — opt-in list of the last 30 text entries, with a shortcut and optional
+  encrypted storage under the current Windows account.
 - **Launch at startup**, **auto-update check**, and a settings window.
 - **Localized UI** — English and Russian (more languages to follow; falls back to English).
 
@@ -62,8 +65,8 @@ P/Invoke code cannot *run* off Windows.
   a GitHub release (pre-release for `0.x`). Code signing runs automatically **if** the
   `WINDOWS_CERT_PFX_BASE64` + `WINDOWS_CERT_PASSWORD` secrets are set; otherwise it ships unsigned.
 - **Update feed:** `windows/version.json` (separate from the repository-root `version.json`, which is
-  the **macOS** feed and must stay where it is). The app checks it once a day and offers to open the
-  download page.
+  the **macOS** feed and must stay where it is). When automatic checks are enabled, the app checks once a day on launch. Installed copies offer
+  to download and run the verified installer. Portable copies open the release page.
 - **Installer:** [`installer/RuSwitcher.iss`](installer/RuSwitcher.iss) (Inno Setup, per-user).
 - **WinGet:** the checked-in manifests describe the upstream RuSwitcher package. NormalSwitcher
   has no WinGet package in this preview.

@@ -66,6 +66,9 @@ public sealed class Settings
         Converters = { new JsonStringEnumConverter() },
     };
 
+    public long FirstLayout { get; set; }
+    public long SecondLayout { get; set; }
+
     public bool ClipboardHistoryEnabled { get; set; }
     public bool ClipboardHistoryPersistent { get; set; }
     public ClipboardShortcut ClipboardHistoryShortcut { get; set; }

@@ -24,10 +24,17 @@ internal sealed class SettingsForm : Form
         ClientSize = new Size(520, 296);
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
+        IntPtr[] layouts = [IntPtr.Zero, .. LayoutSwitcher.Installed()];
+        string[] layoutNames = [L10n.T("settings.layout.auto"), .. layouts.Skip(1).Select(LayoutIcon.Name)];
         AddPage("general",
             Check("settings.startup", AutoStart.IsEnabled(), AutoStart.SetEnabled),
             Check("settings.sound", s.SoundOnSwitch, value => { s.SoundOnSwitch = value; s.Save(); }),
-            Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }));
+            Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }),
+            Choice("settings.layout.first", layoutNames, Array.IndexOf(layouts, new IntPtr(s.FirstLayout)),
+                index => { s.FirstLayout = layouts[index].ToInt64(); s.Save(); }),
+            Choice("settings.layout.second", layoutNames, Array.IndexOf(layouts, new IntPtr(s.SecondLayout)),
+                index => { s.SecondLayout = layouts[index].ToInt64(); s.Save(); }),
+            new Label { Text = L10n.T("settings.layout.hint"), MaximumSize = new Size(440, 0), AutoSize = true });
 
         var triggers = Enum.GetValues<TriggerKind>().Select(TrayIcon.TriggerName).ToArray();
         AddPage("hotkeys",

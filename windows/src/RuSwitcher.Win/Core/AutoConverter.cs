@@ -29,9 +29,8 @@ internal static class AutoConverter
 
         IntPtr targetHkl = IntPtr.Zero;
         string? converted = null;
-        foreach (var layout in LayoutSwitcher.Installed())
+        foreach (var layout in LayoutSwitcher.ConversionTargets(sourceHkl))
         {
-            if (layout == sourceHkl) continue;
             string candidate = KeyMapper.ConvertWord(keys, layout);
             if (candidate.Length != keys.Count || candidate == typed) continue;
             if (!ShouldConvert(typed, candidate, srcTag, SmartConvert.LangTag(layout), caps)) continue;

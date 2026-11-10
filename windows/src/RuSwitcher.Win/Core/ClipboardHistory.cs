@@ -162,18 +162,27 @@ internal sealed class ClipboardHistory(IntPtr window) : IDisposable
 
         if (target is { } original) SetForegroundWindow(original.Foreground);
         if (command == ClearCommand) Clear();
-        else if (command > 0 && command <= items.Length && target is { } expected
-            && InputTarget.Capture() is { IsPasswordEdit: false } current && expected.SameControl(current))
+        else if (command > 0 && command <= items.Length && target is { } expected)
+            _ = PasteAsync(items[command - 1], expected);
+    }
+
+    private async Task PasteAsync(string text, InputTarget expected)
+    {
+        // Activation of another process may complete after the menu closes.
+        if (InputTarget.Capture() is not { } current || !expected.SameControl(current))
+            await Task.Delay(75);
+        if (!Settings.Current.ClipboardHistoryEnabled
+            || InputTarget.Capture() is not { IsPasswordEdit: false } focused || !expected.SameControl(focused))
+            return;
+
+        try
         {
-            try
-            {
-                Clipboard.SetText(items[command - 1], TextDataFormat.UnicodeText);
-                SkipCurrent();
-                Pasted?.Invoke();
-                TextInjector.SendCtrl(VK_V);
-            }
-            catch (ExternalException) { /* An app may still have the clipboard open. */ }
+            Clipboard.SetText(text, TextDataFormat.UnicodeText);
+            SkipCurrent();
+            Pasted?.Invoke();
+            TextInjector.SendCtrl(VK_V);
         }
+        catch (ExternalException) { /* An app may still have the clipboard open. */ }
     }
 
     private void Load()

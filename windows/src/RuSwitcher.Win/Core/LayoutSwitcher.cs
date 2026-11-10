@@ -27,13 +27,27 @@ internal static class LayoutSwitcher
         return GetKeyboardLayout(tid);
     }
 
-    /// <summary>The other layout of the pair (MVP: the first installed HKL that isn't current).</summary>
     public static IntPtr? Opposite()
     {
-        IntPtr cur = Current();
-        foreach (var hkl in Installed())
-            if (hkl != cur) return hkl;
+        foreach (var layout in ConversionTargets(Current())) return layout;
         return null;
+    }
+
+    internal static IEnumerable<IntPtr> ConversionTargets(IntPtr current)
+    {
+        var settings = Settings.Current;
+        var layouts = Installed();
+        var first = new IntPtr(settings.FirstLayout);
+        var second = new IntPtr(settings.SecondLayout);
+        if (first != second && layouts.Contains(first) && layouts.Contains(second))
+        {
+            if (current == first) yield return second;
+            else if (current == second) yield return first;
+            yield break;
+        }
+
+        foreach (var layout in layouts)
+            if (layout != current) yield return layout;
     }
 
     /// <summary>Switch the focused window to <paramref name="hkl"/>.</summary>
