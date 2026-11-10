@@ -1,10 +1,10 @@
 {
-  "version": "1.1.2",
-  "build": "72",
+  "version": "1.1.3",
+  "build": "73",
   "manual_migration": false,
-  "notes": "Новое окно обновления с текущей и новой версией, списком изменений и ходом установки. После установки NormalSwitcher запускается сам.\n\nA new update window shows both versions, release notes, and installation progress. NormalSwitcher restarts automatically after updating.\n",
-  "zip_sha256": "076c37bac99563b0e735251081f32bb1af77fb371bef8327a2cff073a62da25d",
+  "notes": "В настройках теперь можно выбрать и прослушать звук раскладки. Выбор сохраняется между запусками.\n\nChoose and preview a keyboard layout sound in Settings. The selection is saved between launches.\n",
+  "zip_sha256": "13d2af0d7c27a948069e82a566b4d08529d048aa44464df6d401f26ebcf0b441",
   "blobs": [
-    "82bf3d1a01f694868e65a90190ce3f13c7064969"
+    "662df475ddca592f65ad8c40bb0b973524d12a02"
   ]
 }

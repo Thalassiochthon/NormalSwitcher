@@ -436,6 +436,7 @@ final class SettingsWindowController {
             check(L10n.settingsCaretFlag, s.caretFlag, #selector(caretFlagChanged(_:))),
             hint(L10n.settingsCaretFlagHint),
             check(L10n.menuKeySound, s.keySound, #selector(layoutSoundChanged(_:))),
+            layoutSoundPicker(s.layoutSound),
             hint(L10n.settingsLayoutSoundHint),
         ])
         let manual = SettingsDisclosure(title: L10n.settingsGroupManual, views: [
@@ -563,6 +564,28 @@ final class SettingsWindowController {
         }
         SettingsManager.shared.hideMenuBarIcon = hide
         onHideIconChanged?(hide)
+    }
+
+    private func layoutSoundPicker(_ selection: LayoutSound) -> NSView {
+        let picker = popup(#selector(layoutSoundSelectionChanged(_:)))
+        picker.setAccessibilityLabel(L10n.menuKeySound)
+        picker.addItems(withTitles: LayoutSound.allCases.map(\.title))
+        picker.selectItem(at: LayoutSound.allCases.firstIndex(of: selection) ?? 0)
+        let controls = NSStackView(views: [picker, button(L10n.settingsLayoutSoundPreview, #selector(previewLayoutSound))])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.spacing = 8
+        return controls
+    }
+
+    @objc private func layoutSoundSelectionChanged(_ sender: NSPopUpButton) {
+        let sounds = LayoutSound.allCases
+        guard sounds.indices.contains(sender.indexOfSelectedItem) else { return }
+        SettingsManager.shared.layoutSound = sounds[sender.indexOfSelectedItem]
+    }
+
+    @objc private func previewLayoutSound() {
+        SettingsManager.shared.layoutSound.play()
     }
 
     @objc private func layoutSoundChanged(_ sender: NSButton) {

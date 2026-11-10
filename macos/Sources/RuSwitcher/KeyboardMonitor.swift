@@ -529,8 +529,7 @@ final class KeyboardMonitor: @unchecked Sendable {
         let sources = LayoutSwitcher.installedLayouts()
         let id1 = SettingsManager.shared.layout1ID.isEmpty
             ? LayoutSwitcher.autoDetectID1(from: sources) : SettingsManager.shared.layout1ID
-        let name = LayoutSwitcher.currentLayoutID() == id1 ? "Tink" : "Pop"
-        NSSound(named: name)?.play()
+        SettingsManager.shared.layoutSound.play(firstLayout: LayoutSwitcher.currentLayoutID() == id1)
     }
 
     /// Возвращает true, если событие надо «съесть» (только Caps Lock в consume-режиме).

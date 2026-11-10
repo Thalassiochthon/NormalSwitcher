@@ -51,6 +51,7 @@ final class SettingsManager: @unchecked Sendable {
         static let lastWhatsNewVersion = "com.ruswitcher.lastWhatsNewVersion"
         static let lastBetaNotesShown = "com.ruswitcher.lastBetaNotesShown"
         static let keySound = "com.ruswitcher.keySound"
+        static let layoutSound = "com.antonjas.normalswitcher.layoutSound"
         static let caretFlag = "com.ruswitcher.caretFlag"
         static let secureInputNotice = "com.ruswitcher.secureInputNotice"
         static let hideMenuBarIcon = "com.ruswitcher.hideMenuBarIcon"
@@ -428,6 +429,11 @@ final class SettingsManager: @unchecked Sendable {
     var keySound: Bool {
         get { defaults.bool(forKey: Keys.keySound) }
         set { defaults.set(newValue, forKey: Keys.keySound) }
+    }
+
+    var layoutSound: LayoutSound {
+        get { LayoutSound(rawValue: defaults.string(forKey: Keys.layoutSound) ?? "") ?? .automatic }
+        set { defaults.set(newValue.rawValue, forKey: Keys.layoutSound) }
     }
 
     /// Иконка меню-бара в системном стиле: монохромная плашка «РУ/EN» (template)
