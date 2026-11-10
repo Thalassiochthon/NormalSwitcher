@@ -1,8 +1,0 @@
-{
-  "version": "1.1.5",
-  "build": "75",
-  "dev": "",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/v1.1.5",
-  "notes": "В быстром меню буфера обмена теперь восемь последних записей. Пункт «Вся история…» открывает полный список с поиском.\n\nThe clipboard menu now shows the eight most recent entries. All History opens the full, searchable list.\n",
-  "sha256": "000491d63d4b10934fe9d638e74afcabaf48ace0f4df6a67fd674290950a542e"
-}
