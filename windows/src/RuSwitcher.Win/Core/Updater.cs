@@ -1,23 +1,25 @@
+using Microsoft.Win32;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows.Forms;
 
 namespace RuSwitcher.Win.Core;
 
 /// <summary>
-/// Checks GitHub for a newer version — the Windows counterpart of the macOS <c>UpdateChecker</c>.
-/// Reads the same kind of feed (windows/version.json) and, when a newer version exists, offers to
-/// open the download page. It does NOT self-replace the running exe (Windows makes in-place swap of a
-/// running file awkward and risky); it defers to the signed installer, mirroring the macOS
-/// browser-download fallback. Auto-check is throttled to once per 24h and can be turned off; the
-/// manual check always runs. Fully defensive: a network/parse failure is silent on auto-check.
+/// Installs verified updates through Inno Setup for installed copies. Portable copies continue
+/// to use the download page. Automatic checks are opt-in and throttled to once per day.
 /// </summary>
 internal static class Updater
 {
     private const string FeedUrl = "https://raw.githubusercontent.com/antonjas/NormalSwitcher/windows-preview/windows/version.json";
 
     private const string ReleaseUrl = "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v";
+    private const string InstallerUrl = "https://github.com/antonjas/NormalSwitcher/releases/download/win-v";
+    private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{D729A5A6-DE1C-5068-A3B9-97BED831D11B}_is1";
+    private const long MaxInstallerBytes = 256L * 1024 * 1024;
 
     // Single-flight: repeated tray clicks / an overlapping launch check must not spawn concurrent
     // HTTP checks that each write Settings and stack message boxes.
@@ -43,12 +45,15 @@ internal static class Updater
         _ = Task.Run(async () =>
         {
             await Task.Delay(5000);
-            await CheckAsync(silent: true, ui);
+            QueueCheck(silent: true, ui);
         });
     }
 
     /// <summary>Manual check (from the tray/menu) — always reports the result.</summary>
-    public static void CheckNow(SynchronizationContext ui) => _ = CheckAsync(silent: false, ui);
+    public static void CheckNow(SynchronizationContext ui) => QueueCheck(silent: false, ui);
+
+    private static void QueueCheck(bool silent, SynchronizationContext ui) =>
+        ui.Post(state => { _ = CheckAsync(silent); }, null);
 
     private static bool ShouldAutoCheck()
     {
@@ -62,7 +67,7 @@ internal static class Updater
         return true;
     }
 
-    private static async Task CheckAsync(bool silent, SynchronizationContext ui)
+    private static async Task CheckAsync(bool silent)
     {
         if (Interlocked.Exchange(ref _busy, 1) == 1) return;   // a check is already in flight
         try
@@ -77,52 +82,75 @@ internal static class Updater
             }
             catch
             {
-                if (!silent) ui.Post(_ => MessageBox.Show(
+                if (!silent) MessageBox.Show(
                     L10n.T("upd.error"), L10n.T("app.name"),
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning), null);
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             if (feed == null || !Version.TryParse(feed.version, out var latest)
+                || latest.Build < 0 || latest.Revision >= 0 || latest.ToString(3) != feed.version
                 || !string.Equals(feed.url, ReleaseUrl + feed.version, StringComparison.Ordinal))
             {
-                if (!silent) ui.Post(_ => MessageBox.Show(
-                    L10n.T("upd.uptodate", Current.ToString(3)),
-                    L10n.T("app.name"), MessageBoxButtons.OK, MessageBoxIcon.Information), null);
+                if (!silent) MessageBox.Show(L10n.T("upd.error"), L10n.T("app.name"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            // All Settings mutation happens on the UI (message-loop) thread — never race the
-            // hook/tray/winevent writers from this background task.
-            ui.Post(_ => { Settings.Current.LastUpdateCheckTicks = DateTime.UtcNow.Ticks; Settings.Current.Save(); }, null);
+            Settings.Current.LastUpdateCheckTicks = DateTime.UtcNow.Ticks;
+            Settings.Current.Save();
 
             if (latest > Current)
             {
                 if (silent && Settings.Current.SkippedVersion == feed.version) return;   // user skipped this one
-                ui.Post(_ => PromptUpdate(feed), null);
+                await PromptUpdateAsync(feed);
             }
             else if (!silent)
             {
-                ui.Post(_ => MessageBox.Show(
+                MessageBox.Show(
                     L10n.T("upd.uptodate", Current.ToString(3)),
-                    L10n.T("app.name"), MessageBoxButtons.OK, MessageBoxIcon.Information), null);
+                    L10n.T("app.name"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
         finally { Interlocked.Exchange(ref _busy, 0); }
     }
 
-    private static void PromptUpdate(Feed feed)
+    private static async Task PromptUpdateAsync(Feed feed)
     {
+        string? directory = InstalledDirectory();
+        bool canInstall = directory != null && IsInstallerHash(feed.sha256);
         string body = L10n.T("upd.available.body", feed.version, Current.ToString(3));
         if (!string.IsNullOrWhiteSpace(feed.notes)) body += "\n\n" + feed.notes;
-        body += "\n\n" + L10n.T("upd.open");
+        body += "\n\n" + L10n.T(canInstall ? "upd.install" : "upd.open");
 
         var r = MessageBox.Show(body, L10n.T("upd.available.title"),
             MessageBoxButtons.YesNo, MessageBoxIcon.Information);
         if (r == DialogResult.Yes)
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(feed.url) { UseShellExecute = true }); }
-            catch { /* ignore */ }
+            if (!canInstall)
+            {
+                OpenRelease(feed.url);
+                return;
+            }
+            try
+            {
+                string installer = await DownloadInstallerAsync(feed.version, feed.sha256!);
+                var start = new ProcessStartInfo(installer) { UseShellExecute = true };
+                start.ArgumentList.Add("/SILENT");
+                start.ArgumentList.Add("/SP-");
+                start.ArgumentList.Add("/NORESTART");
+                start.ArgumentList.Add("/NORESTARTAPPLICATIONS");
+                start.ArgumentList.Add("/NORMALSWITCHERUPDATE=1");
+                start.ArgumentList.Add("/DIR=" + directory);
+                using var setup = Process.Start(start) ?? throw new IOException("Could not start setup");
+                Native.Win32.PostQuitMessage(0);
+            }
+            catch
+            {
+                if (MessageBox.Show(L10n.T("upd.install.error"), L10n.T("app.name"),
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                    OpenRelease(feed.url);
+            }
         }
         else
         {
@@ -130,5 +158,79 @@ internal static class Updater
             Settings.Current.SkippedVersion = feed.version;
             Settings.Current.Save();
         }
+    }
+
+    private static void OpenRelease(string url)
+    {
+        try { using var browser = Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { /* The update remains available for a later check. */ }
+    }
+
+    private static string? InstalledDirectory()
+    {
+        try
+        {
+            using var entry = Registry.CurrentUser.OpenSubKey(UninstallKey);
+            if (entry?.GetValue("InstallLocation") is not string directory || !Path.IsPathFullyQualified(directory))
+                return null;
+            string installedExe = Path.GetFullPath(Path.Combine(directory, "NormalSwitcher.exe"));
+            return string.Equals(installedExe, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)
+                ? directory : null;
+        }
+        catch { return null; }
+    }
+
+    private static bool IsInstallerHash(string? hash) =>
+        hash is { Length: 64 } && hash.All(Uri.IsHexDigit);
+
+    private static async Task<string> DownloadInstallerAsync(string version, string expectedHash)
+    {
+        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "NormalSwitcher", "Updates");
+        Directory.CreateDirectory(directory);
+        string installer = Path.Combine(directory, "NormalSwitcher-Setup.exe");
+        string partial = installer + ".part";
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            using var http = new HttpClient();
+            using var response = await http.GetAsync(InstallerUrl + version + "/NormalSwitcher-Setup-" + version + ".exe",
+                HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > MaxInstallerBytes)
+                throw new IOException("Update is too large");
+            await using var source = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
+            await using (var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None,
+                65536, useAsync: true))
+            {
+                await CopyVerifiedInstallerAsync(source, output, expectedHash, deadline.Token).ConfigureAwait(false);
+            }
+            File.Move(partial, installer, overwrite: true);
+            return installer;
+        }
+        finally
+        {
+            try { File.Delete(partial); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    internal static async Task CopyVerifiedInstallerAsync(Stream source, Stream output, string expectedHash,
+        CancellationToken cancellationToken = default)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[65536];
+        long size = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            size += read;
+            if (size > MaxInstallerBytes) throw new IOException("Update is too large");
+            hash.AppendData(buffer.AsSpan(0, read));
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+        if (!CryptographicOperations.FixedTimeEquals(hash.GetHashAndReset(), Convert.FromHexString(expectedHash)))
+            throw new IOException("Installer checksum does not match");
     }
 }
