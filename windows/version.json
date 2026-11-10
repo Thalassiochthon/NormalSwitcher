@@ -1,6 +1,6 @@
 {
-  "version": "0.2.4",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.4",
-  "notes": "В настройках теперь можно выбрать и прослушать звук раскладки. Выбор сохраняется между запусками.\n\nChoose and preview a keyboard layout sound in Settings. The selection is saved between launches.",
-  "sha256": "15ac247b64e9c0850b13c382c03e583476878200ac16159ebd10078aed11910f"
+  "version": "0.2.5",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.5",
+  "notes": "Новые версии отмечаются в меню NormalSwitcher. Фоновая проверка больше не открывает окно, а установка по-прежнему начинается после подтверждения.\n\nNew versions appear in the NormalSwitcher menu. Background checks no longer open a window, and installation still requires confirmation.",
+  "sha256": "05bec8f6a359e8c44ee2f4216b7bc92dc285e3af446ad2be3cfa435b939feabb"
 }
