@@ -1,6 +1,6 @@
 {
-  "version": "0.2.3",
-  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.3",
-  "notes": "Исправлена передача символов между Windows и NormalSwitcher при переводе клавиш в текст. Кириллица сохраняется при исправлении раскладки.\n\nFixed Windows keyboard translation to preserve UTF-16 characters, including Cyrillic, during layout correction.",
-  "sha256": "e709d50ce248111ab14a67ff2a375395738e60997c377484d49bf0a37b2e5ed1"
+  "version": "0.2.4",
+  "url": "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.4",
+  "notes": "В настройках теперь можно выбрать и прослушать звук раскладки. Выбор сохраняется между запусками.\n\nChoose and preview a keyboard layout sound in Settings. The selection is saved between launches.",
+  "sha256": "15ac247b64e9c0850b13c382c03e583476878200ac16159ebd10078aed11910f"
 }
