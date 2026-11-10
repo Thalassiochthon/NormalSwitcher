@@ -1,22 +1,10 @@
 {
-  "version": "1.1.0",
-  "build": "70",
+  "version": "1.1.1",
+  "build": "71",
   "manual_migration": false,
-  "notes": "Переработали настройки. Сочетания, автоисправление и буфер обмена теперь в отдельных разделах, дополнительные параметры можно раскрыть по мере необходимости. В меню появился короткий пункт «Выход» с ⌘Q.\n\nПри быстром наборе NormalSwitcher применяет исправление раскладки до исходного пробела, если macOS подтверждает, что текст можно безопасно заменить.\n\nRedesigned the settings window and shortened the menu’s Quit label. During fast local typing, automatic layout correction is applied before the original space when macOS can verify the text can be safely replaced.\n",
-  "zip_sha256": "dd719fb014482f7fadcfcdb5ce490dc4732aa7845a00db79ed8535237dc4d55c",
+  "notes": "Фиолетовый значок NormalSwitcher и компактная N для маленьких размеров. Дополнительные словари русского и английского теперь скачиваются из репозитория NormalSwitcher.\n\nViolet NormalSwitcher branding with a compact N for small icons. Optional Russian and English word packs now download from the NormalSwitcher repository.\n",
+  "zip_sha256": "fe00446f256fa57ea460ed848e80d90b89338aa08604722194a48ad6c4549235",
   "blobs": [
-    "fc595686289513ad515c429b68c765c59eb94e63",
-    "dab8786cd1fb63e2dadc0ebab7ecfc7613ca053d",
-    "d5372c5431e8b200430919e4f053a04c0d12a54c",
-    "169fb8fe45393a7a6525255a8c84b3badcb665db",
-    "873f61b1ec765345fa975bb65b88069b3e96f759",
-    "4ef8ba81b7f0c043d30caa0d36f9de4a24614190",
-    "e173895648a5dad114b7f71bf614ca0cb6179d0f",
-    "8f6f46aa3200f4baa711abb6311a263f284d2783",
-    "ada58a60d2879062a5ac1642d40b96f1e599a558",
-    "00cb4e8e7f3fe855593df8eccbd755bf8af75b8e",
-    "a1ab442f646daa104cc92c95afe1d31247aa991b",
-    "807c4e065a04121997b3a544b1db7c77f4c154e8",
-    "86272624272fc48f7079cceb125aa4e71fb9d43e"
+    "bf5f3535b869d67ea2cee2436017a79641fd6471"
   ]
 }
