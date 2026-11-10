@@ -23,10 +23,10 @@ internal static class Updater
     private const string ReleaseUrl = "http://127.0.0.1:18443/tag/win-v";
     private const string InstallerUrl = "http://127.0.0.1:18443/download/win-v";
 #else
-    private const string FeedUrl = "https://raw.githubusercontent.com/antonjas/NormalSwitcher/windows-preview/windows/version.json";
+    private const string FeedUrl = "https://raw.githubusercontent.com/Thalassiochthon/NormalSwitcher/windows-preview/windows/version.json";
 
-    private const string ReleaseUrl = "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v";
-    private const string InstallerUrl = "https://github.com/antonjas/NormalSwitcher/releases/download/win-v";
+    private const string ReleaseUrl = "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/win-v";
+    private const string InstallerUrl = "https://github.com/Thalassiochthon/NormalSwitcher/releases/download/win-v";
 #endif
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{D729A5A6-DE1C-5068-A3B9-97BED831D11B}_is1";
     private const long MaxInstallerBytes = 256L * 1024 * 1024;
@@ -106,7 +106,7 @@ internal static class Updater
 
             if (feed == null || !Version.TryParse(feed.version, out var latest)
                 || latest.Build < 0 || latest.Revision >= 0 || latest.ToString(3) != feed.version
-                || !string.Equals(feed.url, ReleaseUrl + feed.version, StringComparison.Ordinal))
+                || !MatchesReleaseUrl(feed.url, feed.version))
             {
                 if (_showResult) MessageBox.Show(L10n.T("upd.error"), L10n.T("app.name"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -134,6 +134,17 @@ internal static class Updater
             _showResult = false;
             _busy = false;
         }
+    }
+
+    internal static bool MatchesReleaseUrl(string url, string version)
+    {
+        if (string.Equals(url, ReleaseUrl + version, StringComparison.Ordinal)) return true;
+#if NORMALSWITCHER_UPDATE_SMOKE
+        return false;
+#else
+        return string.Equals(url, "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v" + version,
+            StringComparison.Ordinal);
+#endif
     }
 
     private const string UpdateMode = "--install-update";
@@ -174,7 +185,7 @@ internal static class Updater
         body += "\n\n" + L10n.T("upd.open");
         if (MessageBox.Show(body, L10n.T("upd.available.title"),
                 MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
-            OpenRelease(feed.url);
+            OpenRelease(ReleaseUrl + feed.version);
     }
 
     internal static bool RunHelper(string[] args)

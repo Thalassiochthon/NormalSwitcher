@@ -7,6 +7,16 @@ namespace RuSwitcher.Win.Tests;
 public class UpdaterTests
 {
     [Theory]
+    [InlineData("https://github.com/antonjas/NormalSwitcher/releases/tag/win-v0.2.7", true)]
+    [InlineData("https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/win-v0.2.7", true)]
+    [InlineData("https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/win-v0.2.8", false)]
+    [InlineData("https://github.com/other/NormalSwitcher/releases/tag/win-v0.2.7", false)]
+    public void AcceptsOnlyKnownReleaseUrlsForRequestedVersion(string url, bool accepted)
+    {
+        Assert.Equal(accepted, Updater.MatchesReleaseUrl(url, "0.2.7"));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task StagesInstallerOnlyIfChecksumMatches(bool tampered)

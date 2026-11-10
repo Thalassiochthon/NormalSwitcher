@@ -189,7 +189,8 @@ jobs:
 
           $feed = [ordered]@{
             version = $version
-            url = $release.html_url
+            # Windows 0.2.6 validates this historical owner literally.
+            url = "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v$version"
             notes = (Get-Content "$env:RUNNER_TEMP/windows-update-notes.txt" -Raw).Trim()
             sha256 = $hash
           } | ConvertTo-Json

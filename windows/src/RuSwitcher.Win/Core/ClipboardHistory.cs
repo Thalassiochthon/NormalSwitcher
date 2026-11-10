@@ -13,6 +13,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
     private const int HotkeyId = 1;
     private readonly ClipboardHistoryStore _store = new(Path.Combine(Settings.DataDirectory, "clipboard-history.dat"));
     private readonly List<string> _items = [];
+    private readonly List<string> _pending = [];
     private uint _sequence = GetClipboardSequenceNumber();
     private bool _registered;
     private bool _open;
@@ -47,9 +48,10 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
     {
         try
         {
-            if (enabled) _store.Write(_items);
-            else _store.Clear();
+            if (enabled && !RetryStorage()) return false;
+            if (!enabled) _store.Clear();
             _storageReady = enabled;
+            if (!enabled) _pending.Clear();
             HasError = false;
             Settings.Current.ClipboardHistoryPersistent = enabled;
             Settings.Current.Save();
@@ -127,10 +129,16 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             _items.Remove(text!);
             _items.Insert(0, text!);
             if (_items.Count > ClipboardHistoryStore.Limit) _items.RemoveAt(_items.Count - 1);
-            if (Settings.Current.ClipboardHistoryPersistent && _storageReady)
+            if (Settings.Current.ClipboardHistoryPersistent)
             {
-                try { _store.Write(_items); HasError = false; }
-                catch { HasError = true; }
+                _pending.Remove(text!);
+                _pending.Insert(0, text!);
+                if (_pending.Count > ClipboardHistoryStore.Limit) _pending.RemoveAt(_pending.Count - 1);
+                if (_storageReady && !HasError)
+                {
+                    try { _store.Write(_items); _pending.Clear(); }
+                    catch { HasError = true; }
+                }
             }
         }
         catch (ExternalException) { /* The clipboard owner may still have it open. Retry on the next tick. */ }
@@ -143,14 +151,25 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         var target = InputTarget.Capture();
         if (target is { IsPasswordEdit: true }) return;
         log($"Clipboard history popup opened (has target: {target != null})");
-        using var menu = new ClipboardHistoryMenu(_items.ToArray(), HasError);
+        using var menu = new ClipboardHistoryMenu(_items.ToArray(), HasError, () =>
+        {
+            if (Settings.Current.ClipboardHistoryPersistent)
+            {
+                if (!RetryStorage()) return null;
+            }
+            else
+            {
+                try { _store.Clear(); HasError = false; }
+                catch { return null; }
+            }
+            return _items.ToArray();
+        }, Clear);
         _open = true;
         try { menu.ShowDialog(); }
         finally { _open = false; }
 
         if (target is { } original) SetForegroundWindow(original.Foreground);
-        if (menu.ClearRequested) Clear();
-        else if (menu.Selection is { } selected && target is { } expected)
+        if (menu.Selection is { } selected && target is { } expected)
             _ = PasteAsync(selected, expected);
     }
 
@@ -184,12 +203,38 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         catch { HasError = true; }
     }
 
+    private bool RetryStorage()
+    {
+        try
+        {
+            string[] saved;
+            try { saved = _store.Read(); }
+            catch (FileNotFoundException) { saved = []; }
+            catch (DirectoryNotFoundException) { saved = []; }
+
+            var merged = _pending.Concat(_items).Concat(saved)
+                .Distinct().Take(ClipboardHistoryStore.Limit).ToArray();
+            _store.Write(merged);
+            _items.Clear();
+            _items.AddRange(merged);
+            _pending.Clear();
+            _storageReady = true;
+            HasError = false;
+            return true;
+        }
+        catch { HasError = true; return false; }
+    }
+
     private bool Clear()
     {
-        _items.Clear();
-        SkipCurrent();
-        try { _store.Clear(); _storageReady = true; HasError = false; return true; }
+        try { _store.Clear(); }
         catch { HasError = true; return false; }
+        _items.Clear();
+        _pending.Clear();
+        SkipCurrent();
+        _storageReady = true;
+        HasError = false;
+        return true;
     }
 
     public void Dispose() => Unregister();
