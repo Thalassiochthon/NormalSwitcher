@@ -247,7 +247,7 @@ final class TextConverter {
         }
 
         guard !isConverting, original.count == deleteCount else { return skip("busy-or-length") }
-        guard let focus = focusedElement(app: app, timeout: 0.012) else { return skip("focus-unavailable") }
+        guard let focus = orderedFocus(app: app, deadline: deadline) else { return skip("focus-unavailable") }
         guard let role = focusedRole(of: focus), !Self.nonTextRoles.contains(role) else {
             return skip("focus-not-text")
         }
@@ -284,7 +284,7 @@ final class TextConverter {
             // A retry must verify the complete word in the same field.
             guard ProcessInfo.processInfo.systemUptime + 0.04 < deadline else { return skip("caret-stale") }
             usleep(5_000)
-            guard let currentFocus = focusedElement(app: app, timeout: 0.012), CFEqual(currentFocus, focus),
+            guard let currentFocus = orderedFocus(app: app, deadline: deadline), CFEqual(currentFocus, focus),
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
                   !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentLayoutID() == layoutID,
                   let updated = readCaret(), updated.length == 0, updated.location >= length else {
@@ -303,7 +303,7 @@ final class TextConverter {
             && focusInWebContent(from: focus, timeout: 0.012)
         guard let events = Self.orderedReplacementEvents(deleteCount: deleteCount, insert: normalized,
                                                           bySelection: bySelection),
-              let currentFocus = focusedElement(app: app, timeout: 0.012), CFEqual(currentFocus, focus),
+              let currentFocus = orderedFocus(app: app, deadline: deadline), CFEqual(currentFocus, focus),
               NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
               !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentLayoutID() == layoutID,
               ProcessInfo.processInfo.systemUptime < deadline else { return skip("context-changed-or-timeout") }
@@ -416,6 +416,47 @@ final class TextConverter {
         let element = focused as! AXUIElement
         AXUIElementSetMessagingTimeout(element, timeout)
         return element
+    }
+
+    /// The system-wide query can expose the field when the application's query
+    /// does not. Require the same process and respect the word-boundary deadline.
+    private func orderedFocus(app: NSRunningApplication, deadline: TimeInterval) -> AXUIElement? {
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
+              ProcessInfo.processInfo.systemUptime + 0.012 < deadline else { return nil }
+        if let focus = focusedElement(app: app, timeout: 0.012) { return focus }
+        guard AXIsProcessTrusted(), ProcessInfo.processInfo.systemUptime + 0.018 < deadline else { return nil }
+
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.018)
+        var raw: AnyObject?
+        let result = AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &raw)
+        guard result == .success, let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else {
+            rslog("ordered-space: system focus error=\(result.rawValue)")
+            prepareAccessibility(pid: app.processIdentifier)
+            return nil
+        }
+        let element = raw as! AXUIElement
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success, pid == app.processIdentifier else { return nil }
+        AXUIElementSetMessagingTimeout(element, 0.012)
+        return element
+    }
+
+    private var lastPreparedPID: pid_t?
+    private var lastPreparedAt: TimeInterval = 0
+    private let accessibilityQueue = DispatchQueue(label: "com.ruswitcher.accessibility", qos: .utility)
+
+    /// Request lazy Chromium/Electron accessibility data outside the keyboard callback.
+    private func prepareAccessibility(pid: pid_t) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard lastPreparedPID != pid || now - lastPreparedAt >= 10 else { return }
+        lastPreparedPID = pid
+        lastPreparedAt = now
+        accessibilityQueue.async {
+            let axApp = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(axApp, 0.1)
+            _ = AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
     }
 
     /// 3.5.0b (ревью M7): роль сфокусированного элемента — только если AX её отдал.

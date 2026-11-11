@@ -1,0 +1,32 @@
+name: Package signed NormalSwitcher macOS beta
+on:
+  push:
+    branches: [macos/focused-editor-beta]
+    paths: [release/macos-beta.json]
+permissions:
+  contents: write
+concurrency:
+  group: normalswitcher-macos-beta-release
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify archive, build disk image, and publish beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=release/macos-beta.json
+          version=$(jq -er '.version | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+[a-z]$"))' "$manifest")
+          blob=$(jq -er '.zip_blob | select(test("^[a-f0-9]{40}$"))' "$manifest")
+          hash=$(jq -er '.zip_sha256 | select(test("^[a-f0-9]{64}$"))' "$manifest")
+          archive="$RUNNER_TEMP/NormalSwitcher.zip"
+          gh api "repos/$GITHUB_REPOSITORY/git/blobs/$blob" --jq .content | base64 -D > "$archive"
+          printf '%s  %s\n' "$hash" "$archive" | shasum -a 256 -c -
+          ditto -x -k "$archive" macos
+          bash macos/package_beta.sh "$RUNNER_TEMP"
+          python3 scripts/publish_macos_beta.py "$RUNNER_TEMP/NormalSwitcher-$version.dmg"

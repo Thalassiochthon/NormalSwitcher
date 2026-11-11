@@ -104,10 +104,19 @@ def main():
                           {"draft": False, "prerelease": True, "make_latest": "false"})
     # Draft assets have an untagged URL; use the URL returned after publication.
     asset = next(x for x in release["assets"] if x["name"] == args.asset.name)
-    feed = {**manifest, "url": release["html_url"], "sha256": digest, "source_commit": commit}
+    feed = {key: manifest[key] for key in ("version", "build", "dev", "notes")}
+    feed.update(url=release["html_url"], sha256=digest, source_commit=commit)
     beta = request("/contents/version-beta.json?ref=personal")
     content = json.dumps(feed, ensure_ascii=False, indent=2) + "\n"
-    if beta is None or json.loads(base64.b64decode(beta["content"])) != feed:
+    previous = json.loads(base64.b64decode(beta["content"])) if beta else {}
+    previous_version = previous.get("version", "")
+    if re.fullmatch(r"\d+\.\d+\.\d+[a-z]", previous_version):
+        def order(v):
+            return tuple(map(int, v[:-1].split("."))), v[-1]
+
+        if order(previous_version) > order(version):
+            raise SystemExit("A newer beta is already announced; beta feed unchanged")
+    if previous != feed:
         payload = {"branch": "personal", "message": f"Announce macOS beta {version} to opted-in users",
                    "content": base64.b64encode(content.encode()).decode()}
         if beta is not None:
