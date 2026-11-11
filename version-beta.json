@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0b",
-  "build": "78",
+  "version": "1.2.0d",
+  "build": "80",
   "dev": "",
-  "notes": "В этой сборке исправлена упаковка установочного образа.\n\nБета 1.2.0 — задачи из буфера обмена, компактная история с поиском, шифрование истории и понятный статус автоисправления.\n\nЗадачи: Control+Shift+T. Сохранить текст буфера в задачу: Control+Option+Shift+V. История: Control+Shift+V. Сочетания меняются в настройках.\n\nЭто тестовый выпуск для добровольной проверки. Проверьте создание и сохранение задач, вставку в нужное окно, горячие клавиши и работу после перезапуска.\n\nThis build fixes the installer image packaging.\n\nBeta 1.2.0: clipboard tasks, compact searchable history, encrypted clipboard persistence and automatic-correction status. Configurable shortcuts; please test capture, paste focus and persistence after restart.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0b",
-  "sha256": "26bdd9ba82c330198ef0aee628422f7ba2bdc843e005a894fcfc3a5361ad6e94",
-  "source_commit": "c246bc757ef829da8b344954271e82b93913dcb8"
+  "notes": "Добавлен запасной поиск активного поля при автоисправлении раскладки.\n\nAdds a fallback for locating the focused editor during automatic layout correction.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0d",
+  "sha256": "535b34af5f0ae7a4ffb207b319cb97882821c0c326c71f7040a0425289e76a6f",
+  "source_commit": "691e3d562ad6fc6181ab5d51ae366dc82c3400fc"
 }
