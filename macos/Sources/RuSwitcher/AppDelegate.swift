@@ -692,11 +692,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let layoutID = postBeforeSpace == nil ? "" : LayoutSwitcher.currentLayoutID()
         // The first system spell check can start AppleSpell. Wait for the launch warm-up
         // before running the detector in an active keyboard callback.
-        if postBeforeSpace != nil, !Dict.didWarmUp { return }
+        if postBeforeSpace != nil, !Dict.didWarmUp { rslog("ordered-space: skipped dictionary-warmup"); return }
         let bc = keyboardMonitor.boundaryCount
         guard let (action, ctx) = evaluateWordEnd(keys: keyboardMonitor.prevWordKeys) else { return }
         if let postBeforeSpace {
-            guard let app, action != .none, ProcessInfo.processInfo.systemUptime < deadline else { return }
+            guard action != .none else { return }
+            guard let app, ProcessInfo.processInfo.systemUptime < deadline else {
+                rslog("ordered-space: skipped decision-timeout-or-no-app")
+                return
+            }
             if SpotlightAX.isActive(timeout: 0.012) {
                 keyboardMonitor.deferWordBoundary()
                 return

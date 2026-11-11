@@ -241,31 +241,58 @@ final class TextConverter {
     func replaceBeforeSpace(original: String, insert: String, deleteCount: Int, switchesLayout: Bool,
                             app: NSRunningApplication, layoutID: String, deadline: TimeInterval,
                             post: (CGEvent) -> Void) -> Bool {
-        guard !isConverting, original.count == deleteCount,
-              let focus = focusedElement(app: app, timeout: 0.012),
-              let role = focusedRole(of: focus), !Self.nonTextRoles.contains(role) else { return false }
+        func skip(_ reason: String) -> Bool {
+            rslog("ordered-space: skipped \(reason)")
+            return false
+        }
+
+        guard !isConverting, original.count == deleteCount else { return skip("busy-or-length") }
+        guard let focus = focusedElement(app: app, timeout: 0.012) else { return skip("focus-unavailable") }
+        guard let role = focusedRole(of: focus), !Self.nonTextRoles.contains(role) else {
+            return skip("focus-not-text")
+        }
         var subrole: AnyObject?
         if AXUIElementCopyAttributeValue(focus, kAXSubroleAttribute as CFString, &subrole) == .success,
-           subrole as? String == (kAXSecureTextFieldSubrole as String) { return false }
+           subrole as? String == (kAXSecureTextFieldSubrole as String) { return skip("protected-field") }
 
-        // A selection can be inline completion, or the user may have moved the caret.
-        // Leave either alone when we cannot establish a plain insertion point.
-        var selection: AnyObject?
-        guard AXUIElementCopyAttributeValue(focus, kAXSelectedTextRangeAttribute as CFString, &selection) == .success,
-              let selection, CFGetTypeID(selection) == AXValueGetTypeID() else { return false }
-        var caret = CFRange()
-        guard AXValueGetValue(selection as! AXValue, .cfRange, &caret),
-              caret.length == 0, caret.location >= original.utf16.count else { return false }
+        func readCaret() -> CFRange? {
+            var selection: AnyObject?
+            guard AXUIElementCopyAttributeValue(focus, kAXSelectedTextRangeAttribute as CFString, &selection) == .success,
+                  let selection, CFGetTypeID(selection) == AXValueGetTypeID() else { return nil }
+            var caret = CFRange()
+            return AXValueGetValue(selection as! AXValue, .cfRange, &caret) ? caret : nil
+        }
 
-        // Read only the suffix we are about to replace. If the app supports this attribute,
-        // reject a mismatched suffix (for example after programmatic focus or caret changes).
-        var range = CFRange(location: caret.location - original.utf16.count, length: original.utf16.count)
-        if let parameter = AXValueCreate(.cfRange, &range) {
+        func readSuffix(_ range: CFRange) -> String? {
+            var value = range
+            guard let parameter = AXValueCreate(.cfRange, &value) else { return nil }
             var suffix: AnyObject?
             let result = AXUIElementCopyParameterizedAttributeValue(
                 focus, kAXStringForRangeParameterizedAttribute as CFString, parameter, &suffix
             )
-            if result == .success, suffix as? String != original { return false }
+            return result == .success ? suffix as? String : nil
+        }
+
+        let length = original.utf16.count
+        guard var caret = readCaret() else { return skip("caret-unavailable") }
+        guard caret.length == 0 else { return skip("selection-active") }
+        var range = CFRange(location: caret.location >= length ? caret.location - length : 0, length: length)
+        let before = caret.location >= length ? readSuffix(range) : nil
+        if caret.location < length || (before != nil && before != original) {
+            // The editor can lag behind the keyboard tap. Give the already-delivered
+            // letters a short chance to arrive, with Space still held by the tap.
+            // A retry must verify the complete word in the same field.
+            guard ProcessInfo.processInfo.systemUptime + 0.04 < deadline else { return skip("caret-stale") }
+            usleep(5_000)
+            guard let currentFocus = focusedElement(app: app, timeout: 0.012), CFEqual(currentFocus, focus),
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
+                  !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentLayoutID() == layoutID,
+                  let updated = readCaret(), updated.length == 0, updated.location >= length else {
+                return skip("caret-retry-unavailable")
+            }
+            caret = updated
+            range.location = caret.location - length
+            guard readSuffix(range) == original else { return skip("suffix-mismatch") }
         }
 
         let normalized = Self.normalizedForInsert(insert)
@@ -279,13 +306,14 @@ final class TextConverter {
               let currentFocus = focusedElement(app: app, timeout: 0.012), CFEqual(currentFocus, focus),
               NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
               !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentLayoutID() == layoutID,
-              ProcessInfo.processInfo.systemUptime < deadline else { return false }
+              ProcessInfo.processInfo.systemUptime < deadline else { return skip("context-changed-or-timeout") }
 
         lastOriginal = original + " "
         lastConverted = normalized + " "
         lastWasBuffer = true
         lastUndoSwitchesLayout = switchesLayout
         events.forEach(post)
+        rslog("ordered-space: replacement events posted")
         return true
     }
 
