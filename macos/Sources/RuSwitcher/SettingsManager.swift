@@ -51,6 +51,9 @@ final class SettingsManager: @unchecked Sendable {
         static let lastWhatsNewVersion = "com.ruswitcher.lastWhatsNewVersion"
         static let lastBetaNotesShown = "com.ruswitcher.lastBetaNotesShown"
         static let keySound = "com.ruswitcher.keySound"
+        static let layoutSoundsBySource = "com.antonjas.normalswitcher.layoutSoundsBySource"
+        static let doubleAutoLayoutSound = "com.antonjas.normalswitcher.doubleAutoLayoutSound"
+        static let migratedLayoutSounds = "com.antonjas.normalswitcher.migratedLayoutSounds"
         static let layoutSound = "com.antonjas.normalswitcher.layoutSound"
         static let caretFlag = "com.ruswitcher.caretFlag"
         static let secureInputNotice = "com.ruswitcher.secureInputNotice"
@@ -425,15 +428,40 @@ final class SettingsManager: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Keys.autoConvertOffered) }
     }
 
-    /// issue #7: звук раскладки на первой букве после смены раскладки. По умолчанию OFF.
+    /// issue #7: звук при смене раскладки. По умолчанию OFF.
     var keySound: Bool {
         get { defaults.bool(forKey: Keys.keySound) }
         set { defaults.set(newValue, forKey: Keys.keySound) }
     }
 
-    var layoutSound: LayoutSound {
-        get { LayoutSound(savedValue: defaults.string(forKey: Keys.layoutSound)) }
-        set { defaults.set(newValue.rawValue, forKey: Keys.layoutSound) }
+    var doubleAutoLayoutSound: Bool {
+        get { defaults.bool(forKey: Keys.doubleAutoLayoutSound) }
+        set { defaults.set(newValue, forKey: Keys.doubleAutoLayoutSound) }
+    }
+
+    @MainActor
+    func layoutSounds(including sourceID: String? = nil) -> [String: String] {
+        let layouts = LayoutSwitcher.installedLayouts()
+        var ids = layouts.map(LayoutSwitcher.sourceID).filter { !$0.isEmpty }
+        if let sourceID, !sourceID.isEmpty, !ids.contains(sourceID) { ids.append(sourceID) }
+        let saved = defaults.dictionary(forKey: Keys.layoutSoundsBySource) as? [String: String] ?? [:]
+        guard !ids.isEmpty else { return saved }
+        let migrated = defaults.bool(forKey: Keys.migratedLayoutSounds)
+        let sounds = LayoutSound.assignments(
+            saved, sources: ids, legacy: migrated ? nil : defaults.string(forKey: Keys.layoutSound),
+            first: layout1ID.isEmpty ? LayoutSwitcher.autoDetectID1(from: layouts) : layout1ID,
+            second: layout2ID.isEmpty ? LayoutSwitcher.autoDetectID2(from: layouts) : layout2ID
+        )
+        if sounds != saved { defaults.set(sounds, forKey: Keys.layoutSoundsBySource) }
+        if !migrated { defaults.set(true, forKey: Keys.migratedLayoutSounds) }
+        return sounds
+    }
+
+    @MainActor
+    func setLayoutSound(_ sound: LayoutSound, for sourceID: String) {
+        var sounds = layoutSounds(including: sourceID)
+        sounds[sourceID] = sound.rawValue
+        defaults.set(sounds, forKey: Keys.layoutSoundsBySource)
     }
 
     /// Иконка меню-бара в системном стиле: монохромная плашка «РУ/EN» (template)

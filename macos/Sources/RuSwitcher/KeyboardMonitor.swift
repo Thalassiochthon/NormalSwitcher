@@ -70,8 +70,6 @@ final class KeyboardMonitor: @unchecked Sendable {
     /// Фронтмост-приложение на момент границы слова — чтобы авто-путь не перепечатал
     /// в другое поле, если фокус уехал (Cmd-Tab/Spotlight) без клика/Tab.
     private(set) var prevWordBundleID: String?
-    /// issue #7: взводится при смене раскладки → на первой букве играем звук раскладки.
-    var soundArmed = false
 
     private var onAltTap: (() -> Void)?
     private var onAltReconvert: (() -> Void)?
@@ -448,7 +446,6 @@ final class KeyboardMonitor: @unchecked Sendable {
             wordBeforeBoundaryLength = 0
             boundaryCount = 0
             prevWordKeys = []
-            playLayoutSoundIfArmed()
         } else {
             // Esc, F-клавиши, и т.д. — полный сброс
             fullReset()
@@ -512,7 +509,6 @@ final class KeyboardMonitor: @unchecked Sendable {
             wordBeforeBoundaryLength = 0
             boundaryCount = 0
             prevWordKeys = []
-            playLayoutSoundIfArmed()
             return
         }
         // Цифры/пунктуация/прочее: в буфер не копим, НО и слово «живым» не оставляем —
@@ -520,17 +516,6 @@ final class KeyboardMonitor: @unchecked Sendable {
         // «ghbdtn,» по удалёнке = 6 букв в буфере при 7 символах в поле → стёрся бы лишний).
         // Консервативно сбрасываем: слово с пунктуацией по удалёнке просто не авто-конвертится.
         fullReset()
-    }
-
-    /// issue #7: на первой букве после смены раскладки даём короткий звук, зависящий от
-    /// раскладки — слышно, в какой раскладке начал печатать. Опц., по умолчанию выключено.
-    private func playLayoutSoundIfArmed() {
-        guard soundArmed, SettingsManager.shared.keySound else { return }
-        soundArmed = false
-        let sources = LayoutSwitcher.installedLayouts()
-        let id1 = SettingsManager.shared.layout1ID.isEmpty
-            ? LayoutSwitcher.autoDetectID1(from: sources) : SettingsManager.shared.layout1ID
-        SettingsManager.shared.layoutSound.play(firstLayout: LayoutSwitcher.currentLayoutID() == id1)
     }
 
     /// Возвращает true, если событие надо «съесть» (только Caps Lock в consume-режиме).

@@ -41,6 +41,8 @@ enum L10n {
     static var settingsGroupAppearance: String { s("settings.group.appearance") }
     static func settingsLayoutSoundName(_ id: String) -> String { s("settings.layoutSound." + id) }
     static var settingsLayoutSoundPreview: String { s("settings.layoutSound.preview") }
+    static var settingsLayoutSoundEnabled: String { s("settings.layoutSound.enabled") }
+    static var settingsLayoutSoundDoubleAuto: String { s("settings.layoutSound.doubleAuto") }
     static var settingsLayoutSoundHint: String { s("settings.layoutSound.hint") }
     static var settingsGroupManual: String { s("settings.group.manual") }
     static var settingsGroupDiagnostics: String { s("settings.group.diagnostics") }
@@ -280,8 +282,10 @@ enum L10n {
             "settings.clipboardHistory.hint": "Keeps up to %d recently copied texts.",
             "settings.clipboardHistory.open": "Open Clipboard History",
             "settings.group.appearance": "Menu Bar and Indicators",
-            "settings.layoutSound.hint": "Plays a sound on the first keystroke after the layout changes.",
-            "settings.layoutSound.automatic": "By layout (Tap / Soft)",
+            "settings.layoutSound.hint": "Play the selected sound twice after a layout correction.",
+            "settings.layoutSound.enabled": "Sound When Layout Changes",
+            "settings.layoutSound.doubleAuto": "Double Sound for Automatic Layout Correction",
+            "settings.layoutSound.silent": "No Sound",
             "settings.layoutSound.tap": "Tap",
             "settings.layoutSound.double": "Double tap",
             "settings.layoutSound.wood": "Wood",
@@ -492,8 +496,10 @@ enum L10n {
             "settings.clipboardHistory.hint": "До %d последних скопированных текстов.",
             "settings.clipboardHistory.open": "Открыть историю буфера",
             "settings.group.appearance": "Строка меню и индикаторы",
-            "settings.layoutSound.hint": "Звук воспроизводится при вводе первой буквы после смены раскладки.",
-            "settings.layoutSound.automatic": "По раскладке (Тык / Мягкий)",
+            "settings.layoutSound.hint": "После исправления раскладки слова выбранный звук прозвучит дважды.",
+            "settings.layoutSound.enabled": "Звук при смене раскладки",
+            "settings.layoutSound.doubleAuto": "Двойной сигнал при автоисправлении",
+            "settings.layoutSound.silent": "Без звука",
             "settings.layoutSound.tap": "Тык",
             "settings.layoutSound.double": "Тык-тык",
             "settings.layoutSound.wood": "Дерево",

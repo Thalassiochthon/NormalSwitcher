@@ -14,6 +14,11 @@ final class SettingsWindowController {
     private var abbreviationEditor: AbbreviationEditor?
     private var freqPacksCheckbox: NSButton?
     private var freqPacksStatus: NSTextField?
+    private weak var layoutSoundsOptions: NSStackView?
+    private weak var layoutSoundsScroll: NSScrollView?
+    private var layoutSoundsHeight: NSLayoutConstraint?
+    private var layoutSourcesObserver: NSObjectProtocol?
+    private var soundPreviewButtons: [String: NSButton] = [:]
 
     /// Callback для обновления меню
     var onAutoSwitchChanged: ((Bool) -> Void)?
@@ -179,6 +184,7 @@ final class SettingsWindowController {
             row(NSTextField(wrappingLabelWithString: L10n.settingsLayout1), first),
             row(NSTextField(wrappingLabelWithString: L10n.settingsLayout2), second),
             check(L10n.settingsPerAppLayout, settings.perAppLayout, #selector(perAppLayoutChanged(_:))),
+            layoutSoundSettings(),
             NSBox.separator(),
             row(NSTextField(wrappingLabelWithString: L10n.settingsLanguage), language),
         ])
@@ -457,9 +463,6 @@ final class SettingsWindowController {
             check(L10n.menuMonoIcon, s.monochromeIcon, #selector(monochromeIconChanged(_:))),
             check(L10n.settingsCaretFlag, s.caretFlag, #selector(caretFlagChanged(_:))),
             hint(L10n.settingsCaretFlagHint),
-            check(L10n.menuKeySound, s.keySound, #selector(layoutSoundChanged(_:))),
-            layoutSoundPicker(s.layoutSound),
-            hint(L10n.settingsLayoutSoundHint),
         ])
         let manual = SettingsDisclosure(title: L10n.settingsGroupManual, views: [
             check(L10n.settingsSmartConversion, s.smartConversion, #selector(smartConversionChanged(_:))),
@@ -627,30 +630,112 @@ final class SettingsWindowController {
         onHideIconChanged?(hide)
     }
 
-    private func layoutSoundPicker(_ selection: LayoutSound) -> NSView {
-        let picker = popup(#selector(layoutSoundSelectionChanged(_:)))
-        picker.setAccessibilityLabel(L10n.menuKeySound)
-        picker.addItems(withTitles: LayoutSound.allCases.map(\.title))
-        picker.selectItem(at: LayoutSound.allCases.firstIndex(of: selection) ?? 0)
-        let controls = NSStackView(views: [picker, button(L10n.settingsLayoutSoundPreview, #selector(previewLayoutSound))])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 8
-        return controls
+    private func layoutSoundSettings() -> NSView {
+        let settings = SettingsManager.shared
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        let height = scroll.heightAnchor.constraint(equalToConstant: 0)
+        height.isActive = true
+        let options = settingsStack([
+            scroll,
+            check(L10n.settingsLayoutSoundDoubleAuto, settings.doubleAutoLayoutSound, #selector(doubleAutoSoundChanged(_:))),
+            hint(L10n.settingsLayoutSoundHint),
+        ], spacing: 6)
+        layoutSoundsOptions = options
+        layoutSoundsScroll = scroll
+        layoutSoundsHeight = height
+        options.isHidden = !settings.keySound
+        refreshLayoutSounds()
+        if let layoutSourcesObserver {
+            DistributedNotificationCenter.default().removeObserver(layoutSourcesObserver)
+        }
+        layoutSourcesObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name(kTISNotifyEnabledKeyboardInputSourcesChanged as String),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshLayoutSounds() }
+        }
+        return settingsStack([
+            check(L10n.settingsLayoutSoundEnabled, settings.keySound, #selector(layoutSoundChanged(_:))),
+            options,
+        ], spacing: 8)
+    }
+
+    private func refreshLayoutSounds() {
+        guard let scroll = layoutSoundsScroll else { return }
+        let saved = SettingsManager.shared.layoutSounds()
+        soundPreviewButtons.removeAll()
+        let rows = LayoutSwitcher.installedLayouts().compactMap { source -> NSView? in
+            let id = LayoutSwitcher.sourceID(source)
+            guard let raw = saved[id], let selected = LayoutSound(rawValue: raw),
+                  soundPreviewButtons[id] == nil else { return nil }
+            let name = LayoutSwitcher.sourceName(source)
+            let label = NSTextField(labelWithString: name)
+            label.lineBreakMode = .byTruncatingTail
+            label.toolTip = name
+            let picker = popup(#selector(layoutSoundSelectionChanged(_:)))
+            picker.identifier = NSUserInterfaceItemIdentifier(id)
+            picker.setAccessibilityLabel("\(name) — \(L10n.settingsLayoutSoundEnabled)")
+            picker.addItems(withTitles: LayoutSound.choices.map(\.title))
+            if let index = LayoutSound.choices.firstIndex(of: selected) { picker.selectItem(at: index) }
+
+            let preview = button("▶", #selector(previewLayoutSound(_:)))
+            preview.identifier = NSUserInterfaceItemIdentifier(id)
+            let previewName = "\(L10n.settingsLayoutSoundPreview) — \(name)"
+            preview.setAccessibilityLabel(previewName)
+            preview.toolTip = previewName
+            preview.isEnabled = selected != .silent
+            soundPreviewButtons[id] = preview
+
+            let controls = NSStackView(views: [picker, preview])
+            controls.orientation = .horizontal
+            controls.spacing = 6
+            let soundRow = row(label, controls)
+            soundRow.heightAnchor.constraint(equalToConstant: 32).isActive = true
+            return soundRow
+        }
+        let document = SettingsDocumentView()
+        let stack = settingsStack(rows, spacing: 0)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        scroll.documentView = document
+        document.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            document.heightAnchor.constraint(equalToConstant: CGFloat(rows.count) * 32),
+            stack.topAnchor.constraint(equalTo: document.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -4),
+        ])
+        layoutSoundsHeight?.constant = CGFloat(min(rows.count, 4)) * 32
     }
 
     @objc private func layoutSoundSelectionChanged(_ sender: NSPopUpButton) {
-        let sounds = LayoutSound.allCases
-        guard sounds.indices.contains(sender.indexOfSelectedItem) else { return }
-        SettingsManager.shared.layoutSound = sounds[sender.indexOfSelectedItem]
+        let sounds = LayoutSound.choices
+        guard let id = sender.identifier?.rawValue, sounds.indices.contains(sender.indexOfSelectedItem) else { return }
+        let sound = sounds[sender.indexOfSelectedItem]
+        SettingsManager.shared.setLayoutSound(sound, for: id)
+        soundPreviewButtons[id]?.isEnabled = sound != .silent
     }
 
-    @objc private func previewLayoutSound() {
-        SettingsManager.shared.layoutSound.play()
+    @objc private func previewLayoutSound(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        LayoutSound(savedValue: SettingsManager.shared.layoutSounds()[id]).play(preview: true)
     }
 
     @objc private func layoutSoundChanged(_ sender: NSButton) {
-        SettingsManager.shared.keySound = sender.state == .on
+        let enabled = sender.state == .on
+        SettingsManager.shared.keySound = enabled
+        layoutSoundsOptions?.isHidden = !enabled
+        if enabled { refreshLayoutSounds() } else { LayoutSound.stop() }
+    }
+
+    @objc private func doubleAutoSoundChanged(_ sender: NSButton) {
+        SettingsManager.shared.doubleAutoLayoutSound = sender.state == .on
     }
 
     @objc private func monochromeIconChanged(_ sender: NSButton) {

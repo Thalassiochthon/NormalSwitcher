@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var requestedInputMonitoring = false
     private var permissionsReminder: DispatchWorkItem?
     private var permissionsAlertShown = false
+    private var layoutSoundTransition = LayoutSoundTransition()
     private var iconRefreshTimer: Timer?
     private var updateCheckTimer: Timer?   // периодическая авто-проверка обновлений, пока приложение работает
     private var monitoringActive = false
@@ -713,7 +714,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             keyboardMonitor.markConverted()
             switch action {
             case .convert(let core, _):
-                LayoutSwitcher.switchToOpposite()
+                switchAfterAutoCorrection()
                 DispatchQueue.main.async { [weak self] in self?.updateStatusIcon() }
                 lastAutoConverted = (String(ctx.pair.original.prefix(core)), Date())
             case .fix(_, .typo), .fix(_, .number):
@@ -781,7 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if suffix.isEmpty,
                textConverter.convertSpotlightWord(converted: fixedCore ?? pair.converted, boundaryCount: bc) {
                 keyboardMonitor.markConverted()
-                LayoutSwitcher.switchToOpposite()
+                switchAfterAutoCorrection()
                 updateStatusIcon()
                 lastAutoConverted = (pair.original, Date())
             }
@@ -800,7 +801,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                  passthroughSuffix: convertedSuffix, typedSuffix: suffix,
                                  convertedOverride: fixedCore) {
             keyboardMonitor.markConverted()
-            LayoutSwitcher.switchToOpposite()
+            switchAfterAutoCorrection()
             updateStatusIcon()
             lastAutoConverted = (pair.original, Date())
         }
@@ -830,7 +831,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                  skipIfInlineCompletion: isTypo)
         lastAutoConverted = nil
         if replaced, edit.switchesLayout {   // ревью M1: замены не было — раскладку не трогаем
-            LayoutSwitcher.switchToOpposite()
+            switchAfterAutoCorrection()
             updateStatusIcon()
         }
         return true
@@ -990,6 +991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         iconRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.updateStatusIcon() }
         }
+        _ = layoutSoundTransition.update(LayoutSwitcher.currentLayoutID())
         // issue #9: иконка должна отражать раскладку и при СИСТЕМНОЙ смене (стандартный/
         // переопределённый хоткей), а не только при нашей конверсии. Слушаем системное
         // распределённое уведомление о смене источника ввода.
@@ -1008,8 +1010,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func systemInputSourceChanged() {
         updateStatusIcon()
-        keyboardMonitor.soundArmed = true  // issue #7: следующая буква даст звук раскладки
-        keyboardMonitor.resetLineBuffer()  // скептик 3.2.0: не декодировать строку старой раскладкой
+        keyboardMonitor.resetLineBuffer()
+        // Process on the main queue after a synchronous auto-correction switch.
+        // The same confirmed input source is then a duplicate notification.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.playLayoutTransition(to: LayoutSwitcher.currentLayoutID())
+        }
+    }
+
+    private func switchAfterAutoCorrection() {
+        // Account for any intervening system switch whose notification is queued.
+        playLayoutTransition(to: LayoutSwitcher.currentLayoutID())
+        let target = LayoutSwitcher.switchToOpposite()
+        let actual = LayoutSwitcher.currentLayoutID()
+        playLayoutTransition(to: actual, corrected: target == actual)
+    }
+
+    private func playLayoutTransition(to id: String, corrected: Bool = false) {
+        guard layoutSoundTransition.update(id) else { return }
+        let settings = SettingsManager.shared
+        guard settings.keySound else { return }
+        let sound = LayoutSound(savedValue: settings.layoutSounds(including: id)[id])
+        sound.play(twice: corrected && settings.doubleAutoLayoutSound)
     }
 
     /// Собирает меню статус-бара. Вызывается заново при смене языка интерфейса,
