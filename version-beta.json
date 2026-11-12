@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0e",
-  "build": "81",
+  "version": "1.2.0g",
+  "build": "83",
   "dev": "",
-  "notes": "Звук при смене раскладки с отдельными настройками для каждого источника ввода.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0e",
-  "sha256": "acf934464aadbef6a2cd3f6350a44be666923d1ebaedc19d32828f67633274bc",
-  "source_commit": "1f1e4a9674a7b16306db50e0329bbf430186f076"
+  "notes": "Поиск активного поля заранее и проверка исходного слова и курсора перед автоисправлением по пробелу, Enter и Tab.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0g",
+  "sha256": "478a55c4fe0be7530aa158e3b493acce6019d7c245013bb9f4d5c17f37cd3b8c",
+  "source_commit": "5c5445cb44326e4ff694e70c1a054e1838733681"
 }
