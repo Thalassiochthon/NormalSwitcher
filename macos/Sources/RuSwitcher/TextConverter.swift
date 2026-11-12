@@ -247,7 +247,10 @@ final class TextConverter {
         }
 
         guard !isConverting, original.count == deleteCount else { return skip("busy-or-length") }
-        guard let focus = orderedFocus(app: app, deadline: deadline) else { return skip("focus-unavailable") }
+        guard let target = orderedFocus(app: app, deadline: deadline) else {
+            return skip("focus-unavailable app=\(app.bundleIdentifier ?? "unknown")")
+        }
+        let focus = target.element
         guard let role = focusedRole(of: focus), !Self.nonTextRoles.contains(role) else {
             return skip("focus-not-text")
         }
@@ -256,11 +259,11 @@ final class TextConverter {
            subrole as? String == (kAXSecureTextFieldSubrole as String) { return skip("protected-field") }
 
         func readCaret() -> CFRange? {
-            var selection: AnyObject?
-            guard AXUIElementCopyAttributeValue(focus, kAXSelectedTextRangeAttribute as CFString, &selection) == .success,
-                  let selection, CFGetTypeID(selection) == AXValueGetTypeID() else { return nil }
-            var caret = CFRange()
-            return AXValueGetValue(selection as! AXValue, .cfRange, &caret) ? caret : nil
+            let selection = axAttribute(focus, kAXSelectedTextRangeAttribute as CFString)
+            if let caret = Self.axRange(selection) { return caret }
+            guard let ranges = axAttribute(focus, kAXSelectedTextRangesAttribute as CFString) as? [AnyObject],
+                  ranges.count == 1 else { return nil }
+            return Self.axRange(ranges[0])
         }
 
         func readSuffix(_ range: CFRange) -> String? {
@@ -270,7 +273,10 @@ final class TextConverter {
             let result = AXUIElementCopyParameterizedAttributeValue(
                 focus, kAXStringForRangeParameterizedAttribute as CFString, parameter, &suffix
             )
-            return result == .success ? suffix as? String : nil
+            if result == .success, let text = suffix as? String { return text }
+            guard ProcessInfo.processInfo.systemUptime + 0.012 < deadline,
+                  let value = axAttribute(focus, kAXValueAttribute as CFString) as? String else { return nil }
+            return Self.textInRange(value, range: range)
         }
 
         let length = original.utf16.count
@@ -278,13 +284,13 @@ final class TextConverter {
         guard caret.length == 0 else { return skip("selection-active") }
         var range = CFRange(location: caret.location >= length ? caret.location - length : 0, length: length)
         let before = caret.location >= length ? readSuffix(range) : nil
-        if caret.location < length || (before != nil && before != original) {
+        if caret.location < length || (before != nil && before != original) || (target.window != nil && before == nil) {
             // The editor can lag behind the keyboard tap. Give the already-delivered
             // letters a short chance to arrive, with Space still held by the tap.
             // A retry must verify the complete word in the same field.
             guard ProcessInfo.processInfo.systemUptime + 0.04 < deadline else { return skip("caret-stale") }
             usleep(5_000)
-            guard let currentFocus = orderedFocus(app: app, deadline: deadline), CFEqual(currentFocus, focus),
+            guard orderedFocusMatches(target, app: app, deadline: deadline),
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
                   !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentLayoutID() == layoutID,
                   let updated = readCaret(), updated.length == 0, updated.location >= length else {
@@ -303,7 +309,7 @@ final class TextConverter {
             && focusInWebContent(from: focus, timeout: 0.012)
         guard let events = Self.orderedReplacementEvents(deleteCount: deleteCount, insert: normalized,
                                                           bySelection: bySelection),
-              let currentFocus = orderedFocus(app: app, deadline: deadline), CFEqual(currentFocus, focus),
+              orderedFocusMatches(target, app: app, deadline: deadline),
               NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
               !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentLayoutID() == layoutID,
               ProcessInfo.processInfo.systemUptime < deadline else { return skip("context-changed-or-timeout") }
@@ -313,7 +319,8 @@ final class TextConverter {
         lastWasBuffer = true
         lastUndoSwitchesLayout = switchesLayout
         events.forEach(post)
-        rslog("ordered-space: replacement events posted")
+        rslog(target.window == nil ? "ordered-space: replacement events posted"
+            : "ordered-space: replacement events posted via focused window")
         return true
     }
 
@@ -418,28 +425,119 @@ final class TextConverter {
         return element
     }
 
-    /// The system-wide query can expose the field when the application's query
-    /// does not. Require the same process and respect the word-boundary deadline.
-    private func orderedFocus(app: NSRunningApplication, deadline: TimeInterval) -> AXUIElement? {
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
-              ProcessInfo.processInfo.systemUptime + 0.012 < deadline else { return nil }
-        if let focus = focusedElement(app: app, timeout: 0.012) { return focus }
-        guard AXIsProcessTrusted(), ProcessInfo.processInfo.systemUptime + 0.018 < deadline else { return nil }
-
-        let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.018)
+    private func axAttribute(_ element: AXUIElement, _ attribute: CFString) -> AnyObject? {
         var raw: AnyObject?
-        let result = AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &raw)
-        guard result == .success, let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else {
-            rslog("ordered-space: system focus error=\(result.rawValue)")
-            prepareAccessibility(pid: app.processIdentifier)
+        guard AXUIElementCopyAttributeValue(element, attribute, &raw) == .success else { return nil }
+        return raw
+    }
+
+    private func axElement(_ element: AXUIElement, _ attribute: CFString) -> AXUIElement? {
+        guard let value = axAttribute(element, attribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
+    private static func axRange(_ value: AnyObject?) -> CFRange? {
+        guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(value as! AXValue, .cfRange, &range), range.location >= 0, range.length >= 0 else {
             return nil
         }
-        let element = raw as! AXUIElement
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success, pid == app.processIdentifier else { return nil }
-        AXUIElementSetMessagingTimeout(element, 0.012)
-        return element
+        return range
+    }
+
+    nonisolated static func textInRange(_ text: String, range: CFRange) -> String? {
+        let value = text as NSString
+        guard range.location >= 0, range.length >= 0, range.location <= value.length,
+              range.length <= value.length - range.location else { return nil }
+        return value.substring(with: NSRange(location: range.location, length: range.length))
+    }
+
+    private func isFocusedTextField(_ element: AXUIElement) -> Bool {
+        guard axAttribute(element, kAXFocusedAttribute as CFString) as? Bool == true,
+              let role = focusedRole(of: element),
+              ["AXTextArea", "AXTextField", "AXSearchField", "AXComboBox"].contains(role) else { return false }
+        return axAttribute(element, "AXEditable" as CFString) as? Bool != false
+            && axAttribute(element, kAXSubroleAttribute as CFString) as? String != (kAXSecureTextFieldSubrole as String)
+    }
+
+    private static func canHoldOrderedCaret(_ role: String) -> Bool {
+        role != "AXApplication" && role != "AXWindow" && !nonTextRoles.contains(role)
+    }
+
+    private typealias OrderedFocus = (element: AXUIElement, window: AXUIElement?)
+
+    private func orderedFocusMatches(_ target: OrderedFocus, app: NSRunningApplication,
+                                     deadline: TimeInterval) -> Bool {
+        guard let window = target.window else {
+            return orderedFocus(app: app, deadline: deadline).map { CFEqual($0.element, target.element) } ?? false
+        }
+        guard ProcessInfo.processInfo.systemUptime + 0.020 < deadline else { return false }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(appElement, 0.008)
+        return axElement(appElement, kAXFocusedWindowAttribute as CFString).map { CFEqual($0, window) } == true
+            && isFocusedTextField(target.element)
+    }
+
+    /// Some editors expose a focused window and focused text child even when
+    /// both app and system focused-element queries return no value.
+    private func orderedFocus(app: NSRunningApplication, deadline: TimeInterval)
+        -> OrderedFocus? {
+        let pid = app.processIdentifier
+        func hasTime(_ seconds: TimeInterval) -> Bool {
+            ProcessInfo.processInfo.systemUptime + seconds < deadline
+        }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid, hasTime(0.012) else { return nil }
+
+        let appElement = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(appElement, 0.012)
+        if let focus = axElement(appElement, kAXFocusedUIElementAttribute as CFString) {
+            AXUIElementSetMessagingTimeout(focus, 0.012)
+            if let role = focusedRole(of: focus), Self.canHoldOrderedCaret(role) {
+                return (focus, nil)
+            }
+        }
+
+        if AXIsProcessTrusted(), hasTime(0.012) {
+            let system = AXUIElementCreateSystemWide()
+            AXUIElementSetMessagingTimeout(system, 0.012)
+            if let focus = axElement(system, kAXFocusedUIElementAttribute as CFString) {
+                var focusPID: pid_t = 0
+                AXUIElementSetMessagingTimeout(focus, 0.012)
+                if AXUIElementGetPid(focus, &focusPID) == .success, focusPID == pid,
+                   let role = focusedRole(of: focus), Self.canHoldOrderedCaret(role) {
+                    return (focus, nil)
+                }
+            }
+        }
+
+        guard hasTime(0.020), let window = axElement(appElement, kAXFocusedWindowAttribute as CFString) else {
+            prepareAccessibility(pid: pid)
+            return nil
+        }
+        AXUIElementSetMessagingTimeout(window, 0.008)
+        if let focus = axElement(window, kAXFocusedUIElementAttribute as CFString), hasTime(0.012) {
+            AXUIElementSetMessagingTimeout(focus, 0.008)
+            if isFocusedTextField(focus) { return (focus, window) }
+        }
+
+        var nodes = [window]
+        var index = 0
+        while index < nodes.count, hasTime(0.020) {
+            let node = nodes[index]
+            index += 1
+            AXUIElementSetMessagingTimeout(node, 0.006)
+            if isFocusedTextField(node) { return (node, window) }
+            let remaining = 48 - nodes.count
+            if remaining > 0, hasTime(0.012) {
+                var children: CFArray?
+                if AXUIElementCopyAttributeValues(node, kAXChildrenAttribute as CFString, 0, remaining, &children) == .success,
+                   let elements = children as? [AXUIElement] {
+                    nodes.append(contentsOf: elements)
+                }
+            }
+        }
+        prepareAccessibility(pid: pid)
+        return nil
     }
 
     private var lastPreparedPID: pid_t?
