@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0d",
-  "build": "80",
+  "version": "1.2.0e",
+  "build": "81",
   "dev": "",
-  "notes": "Добавлен запасной поиск активного поля при автоисправлении раскладки.\n\nAdds a fallback for locating the focused editor during automatic layout correction.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0d",
-  "sha256": "535b34af5f0ae7a4ffb207b319cb97882821c0c326c71f7040a0425289e76a6f",
-  "source_commit": "691e3d562ad6fc6181ab5d51ae366dc82c3400fc"
+  "notes": "Звук при смене раскладки с отдельными настройками для каждого источника ввода.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0e",
+  "sha256": "acf934464aadbef6a2cd3f6350a44be666923d1ebaedc19d32828f67633274bc",
+  "source_commit": "1f1e4a9674a7b16306db50e0329bbf430186f076"
 }
