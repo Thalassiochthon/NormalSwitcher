@@ -78,14 +78,29 @@ internal sealed class SettingsForm : Form
 
         IntPtr[] layouts = [IntPtr.Zero, .. LayoutSwitcher.Installed()];
         string[] layoutNames = [L10n.T("settings.layout.auto"), .. layouts.Skip(1).Select(LayoutIcon.Name)];
-        AddPage("general",
+        string[] soundNames = Sound.Choices.Select(sound => L10n.T("settings.sound." + sound)).ToArray();
+        string[] layoutSoundNames = [L10n.T("settings.sound.inherit"), .. soundNames];
+        Control LayoutSoundChoice(IntPtr layout)
+        {
+            long key = Sound.LayoutKey(layout);
+            int selected = s.LayoutSounds.TryGetValue(key, out var saved)
+                ? 1 + Array.IndexOf(Sound.Choices.ToArray(), Sound.Resolve(saved)) : 0;
+            return Choice(LayoutIcon.Name(layout), layoutSoundNames, selected, index =>
+            {
+                if (index == 0) s.LayoutSounds.Remove(key);
+                else s.LayoutSounds[key] = Sound.Choices[index - 1];
+                s.Save();
+            }, index => Sound.Play(index == 0 ? s.LayoutSound : Sound.Choices[index - 1]));
+        }
+        AddPage("general", [
             Check("tray.enable", s.KeyboardEnabled, value => KeyboardEnabledChanged?.Invoke(value)),
             Check("settings.startup", AutoStart.IsEnabled(), AutoStart.SetEnabled),
             Check("settings.sound", s.SoundOnSwitch, value => { s.SoundOnSwitch = value; s.Save(); }),
-            Choice("settings.sound.choice", Sound.Choices.Select(sound => L10n.T("settings.sound." + sound)).ToArray(),
+            Choice("settings.sound.choice", soundNames,
                 Array.IndexOf(Sound.Choices.ToArray(), Sound.Resolve(s.LayoutSound)),
                 index => { s.LayoutSound = Sound.Choices[index]; s.Save(); },
                 index => Sound.Play(Sound.Choices[index])),
+            .. layouts.Skip(1).Select(LayoutSoundChoice),
             Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }),
             Choice("settings.layout.first", layoutNames, Array.IndexOf(layouts, new IntPtr(s.FirstLayout)),
                 index => { s.FirstLayout = layouts[index].ToInt64(); s.Save(); }),
@@ -97,7 +112,7 @@ internal sealed class SettingsForm : Form
                 {
                     s.UiLanguage = new[] { "", "en", "ru" }[index];
                     s.Save();
-                }));
+                })]);
 
         var triggers = Enum.GetValues<TriggerKind>().Select(TrayIcon.TriggerName).ToArray();
         Control Shortcut(ShortcutAction action) =>

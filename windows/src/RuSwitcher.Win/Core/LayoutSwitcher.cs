@@ -66,6 +66,5 @@ internal static class LayoutSwitcher
     {
         if (hwnd != IntPtr.Zero)
             PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl);
-        Sound.Switch();   // issue #7: optional cue on layout change
     }
 }

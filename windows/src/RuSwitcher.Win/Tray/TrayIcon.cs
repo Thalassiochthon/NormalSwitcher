@@ -151,6 +151,7 @@ internal sealed class TrayIcon : IDisposable
         _nid = data;
         _shownLayout = layout;
         _monochrome = monochrome;
+        if (changed) Sound.Switch(layout);
         if (changed && Settings.Current.CaretIndicator)
             (_badge ??= new CaretBadge()).ShowAtCaret(layout);
     }
