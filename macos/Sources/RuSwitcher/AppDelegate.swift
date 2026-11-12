@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusMenuPasteTarget: NSRunningApplication?
     private let keyboardMonitor = KeyboardMonitor()
     private let textConverter = TextConverter()
+    private var lastEditorFailure: (pid: pid_t, time: TimeInterval, reason: String)?
     private lazy var clipboardHistory = ClipboardHistory(converter: textConverter, keyboardMonitor: keyboardMonitor)
     private let quickTasks = QuickTasks()
     private let settingsController = SettingsWindowController()
@@ -33,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quickTasks.start()
         setupStatusItem()
         setupSettingsCallbacks()
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(self, selector: #selector(editorContextChanged),
+                              name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(editorContextChanged),
+                              name: NSWorkspace.didWakeNotification, object: nil)
         syncLoginItem()
         // «Запускались раньше?» снимаем ДО визарда: он через startMonitoring →
         // offerLaunchAtLoginIfNeeded выставляет launchAtLoginAsked уже на этом же
@@ -462,11 +468,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         monitoringActive = true
-        keyboardMonitor.onWordBoundary = { [weak self] postBeforeSpace in
-            self?.handleAutoConvert(postBeforeSpace: postBeforeSpace)
+        keyboardMonitor.onWordBoundary = { [weak self] candidate, post in
+            self?.handleAutoConvert(candidate, post: post)
         }
-        keyboardMonitor.onWordEndSync = { [weak self] key, keys, code, flags in
-            self?.handleWordEndSync(key: key, keys: keys, keyCode: code, flags: flags) ?? false
+        keyboardMonitor.onWordStarted = { [weak self] pid in
+            self?.textConverter.prepareEditorContext(pid: pid)
+        }
+        keyboardMonitor.onInputReset = { [weak self] in
+            self?.textConverter.invalidateEditorContext()
         }
         // Ревью C1: пути с Cmd+C / Shift+Cmd+← на главном потоке — при выключенном tap'е.
         textConverter.suspendTap = { [weak self] body in
@@ -686,72 +695,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func handleAutoConvert(postBeforeSpace: ((CGEvent) -> Void)?) {
-        rslog("auto: fired")
-        let deadline = ProcessInfo.processInfo.systemUptime + 0.12
-        let app = postBeforeSpace == nil ? nil : NSWorkspace.shared.frontmostApplication
-        let layoutID = postBeforeSpace == nil ? "" : LayoutSwitcher.currentLayoutID()
-        // The first system spell check can start AppleSpell. Wait for the launch warm-up
-        // before running the detector in an active keyboard callback.
-        if postBeforeSpace != nil, !Dict.didWarmUp { rslog("ordered-space: skipped dictionary-warmup"); return }
-        let bc = keyboardMonitor.boundaryCount
-        guard let (action, ctx) = evaluateWordEnd(keys: keyboardMonitor.prevWordKeys) else { return }
-        if let postBeforeSpace {
-            guard action != .none else { return }
-            guard let app, ProcessInfo.processInfo.systemUptime < deadline else {
-                rslog("ordered-space: skipped decision-timeout-or-no-app")
-                return
-            }
-            if SpotlightAX.isActive(timeout: 0.012) {
-                keyboardMonitor.deferWordBoundary()
-                return
-            }
-            guard let edit = wordEndReplacement(action, ctx),
-                  textConverter.replaceBeforeSpace(original: ctx.pair.original, insert: edit.text,
-                                                   deleteCount: ctx.keys.count, switchesLayout: edit.switchesLayout,
-                                                   app: app, layoutID: layoutID, deadline: deadline,
-                                                   post: postBeforeSpace) else { return }
-            keyboardMonitor.markConverted()
-            switch action {
-            case .convert(let core, _):
-                switchAfterAutoCorrection()
-                DispatchQueue.main.async { [weak self] in self?.updateStatusIcon() }
-                lastAutoConverted = (String(ctx.pair.original.prefix(core)), Date())
-            case .fix(_, .typo), .fix(_, .number):
-                lastAutoConverted = (ctx.pair.original, Date())
-            default:
-                lastAutoConverted = nil
-            }
+    @objc private func editorContextChanged() {
+        keyboardMonitor.resetInputTracking()
+        lastEditorFailure = nil
+        if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+           SettingsManager.shared.wordEndPipelineActive, !AutoSwitchPolicy.secureInputActive {
+            textConverter.prepareEditorContext(pid: pid)
+        }
+    }
+
+    private func handleAutoConvert(_ candidate: KeyboardMonitor.WordBoundary, post: ((CGEvent) -> Void)?) {
+        let deadline = candidate.started + 0.12
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier == candidate.pid,
+              LayoutSwitcher.currentLayoutID() == candidate.layoutID,
+              !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentSourceIsKeyboardLayout() else { return }
+
+        let attempt = UUID().uuidString.prefix(8)
+        let pid = app.processIdentifier
+        let trigger = candidate.key
+        func finish(_ outcome: String, reason: String? = nil) {
+            let now = ProcessInfo.processInfo.systemUptime
+            if let reason { lastEditorFailure = (pid, now, reason) }
+            let ms = Int((now - candidate.started) * 1_000)
+            rslog("word-end id=\(attempt) app=\(app.bundleIdentifier ?? "unknown") key=\(trigger) result=\(outcome) ms=\(ms)")
+        }
+
+        let remoteMode = SettingsManager.shared.remoteDesktopMode
+        if post == nil, !remoteMode, !SpotlightAX.isActive(timeout: 0.006) {
+            finish("passive-tap", reason: taskText("Automatic correction requires active keyboard access",
+                                                  "Для автоисправления нужен активный доступ к клавиатуре"))
+            return
+        }
+        guard Dict.didWarmUp else { finish("dictionary-warmup"); return }
+        guard let (action, ctx) = evaluateWordEnd(keys: candidate.keys) else { finish("ineligible"); return }
+        guard action != .none else { finish("no-edit"); return }
+        guard ProcessInfo.processInfo.systemUptime + 0.012 < deadline else {
+            finish("decision-timeout")
             return
         }
 
-        let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        // Удалёнка: НЕ выходим сразу — прогоняем детектор по своему (чистому) буферу, и при
-        // «не той раскладке» переключаем СВОЮ раскладку (конверсию делает инстанс на той стороне).
-        let deferToRemote = SettingsManager.shared.remoteDesktopMode && AutoSwitchPolicy.isRemoteDesktopClient(frontID)
-        switch action {
-        case .none:
+        // Spotlight and explicitly enabled remote input use their specialized paths.
+        let spotlight = SpotlightAX.isActive(timeout: 0.006)
+        if spotlight, post != nil, trigger == .space {
+            keyboardMonitor.deferWordBoundary(candidate)
             return
-        case .convert(let core, let fixedCore):
-            performAutoConvert(ctx, coreLength: core, fixedCore: fixedCore, boundaryCount: bc, deferToRemote: deferToRemote)
-        case .expand(let text), .fix(let text, _):
-            // Автозамена и правка — только локально и не в Spotlight (там стирание по счётчику
-            // оставляет лишнюю букву, #16).
-            guard !deferToRemote, !SpotlightAX.isActive() else { return }
-            let spaces = String(repeating: " ", count: bc)
-            if textConverter.replaceTail(deleteCount: ctx.keys.count + bc, insert: text + spaces,
-                                         undoOriginal: ctx.pair.original + spaces) {
-                keyboardMonitor.markConverted()
-                // Откат опечатки или числа предлагает «в исключения». Автозамены — нет (своё
-                // сокращение), двух заглавных — тоже: в список ушло бы «когда» в нижнем регистре
-                // и навсегда выключило бы конверсию «rjulf» → «когда» (ревью I2).
-                if case .fix(_, let kind) = action, kind != .twoCaps {
-                    lastAutoConverted = (ctx.pair.original, Date())
-                } else {
-                    lastAutoConverted = nil
-                }
-            }
         }
+        if post == nil {
+            if case .convert(let core, let fixedCore) = action {
+                performAutoConvert(ctx, coreLength: core, fixedCore: fixedCore,
+                                   boundaryCount: keyboardMonitor.boundaryCount,
+                                   deferToRemote: AutoSwitchPolicy.shouldDeferToRemoteClient)
+            }
+            return
+        }
+        guard let post, !spotlight, !AutoSwitchPolicy.shouldDeferToRemoteClient,
+              let edit = wordEndReplacement(action, ctx) else { finish("unsupported"); return }
+        if let failure = textConverter.replaceBeforeBoundary(
+            original: ctx.pair.original, insert: edit.text, deleteCount: ctx.keys.count,
+            switchesLayout: edit.switchesLayout, key: trigger, app: app,
+            layoutID: candidate.layoutID, deadline: deadline, post: post
+        ) {
+            finish(failure.rawValue, reason: failure.message)
+            return
+        }
+
+        lastEditorFailure = nil
+        keyboardMonitor.markConverted()
+        lastAutoConverted = nil
+        switch action {
+        case .convert(let core, _):
+            switchAfterAutoCorrection()
+            DispatchQueue.main.async { [weak self] in self?.updateStatusIcon() }
+            if trigger == .space { lastAutoConverted = (String(ctx.pair.original.prefix(core)), Date()) }
+        case .fix(_, .typo), .fix(_, .number):
+            if trigger == .space { lastAutoConverted = (ctx.pair.original, Date()) }
+        default:
+            break
+        }
+        finish("events-posted")
     }
 
     /// Конверсия раскладки по решению конвейера (бывшее тело handleAutoConvert после plan).
@@ -805,36 +826,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updateStatusIcon()
             lastAutoConverted = (pair.original, Date())
         }
-    }
-
-    /// Enter/Tab (3.5.0b): решение синхронно в колбэке tap'а (главный поток). true — клавиша
-    /// придержана: перепечатка и повтор клавиши уходят асинхронно через replaceTail, отката
-    /// нет (сообщение уже ушло / фокус уехал), предложения «в исключения» тоже.
-    private func handleWordEndSync(key: WordEndKey, keys: [TypedKey], keyCode: UInt16, flags: CGEventFlags) -> Bool {
-        if AutoSwitchPolicy.shouldDeferToRemoteClient { return false }
-        // Решение — в колбэке tap'а, который держит клавишу. Дешёвые гейты идут первыми (внутри
-        // evaluateWordEnd), Spotlight (CGWindowList + AX) — только если есть что менять (ревью M3).
-        let started = Date()
-        guard let (action, ctx) = evaluateWordEnd(keys: keys) else { return false }
-        if case .none = action { return false }
-        if SpotlightAX.isActive() { return false }
-        // Долгое решение (холодный AppleSpell) — не рискуем таймаутом tap'а: клавиша уходит как есть.
-        if Date().timeIntervalSince(started) > 0.2 { rslog("wordEnd: decision too slow — pass"); return false }
-        guard let edit = wordEndReplacement(action, ctx) else { return false }
-        let isTypo: Bool
-        if case .fix(_, .typo) = action { isTypo = true } else { isTypo = false }
-        rslog("wordEnd \(key): replace \(ctx.keys.count) → \(edit.text.count)")
-        // Сразу, без main.async (ревью M2): замена встаёт в очередь инжекта раньше, чем
-        // успеют прийти клавиши, нажатые после Enter.
-        let replaced = textConverter.replaceTail(deleteCount: ctx.keys.count, insert: edit.text,
-                                                 repostKey: (keyCode, flags), clearInlineCompletion: true,
-                                                 skipIfInlineCompletion: isTypo)
-        lastAutoConverted = nil
-        if replaced, edit.switchesLayout {   // ревью M1: замены не было — раскладку не трогаем
-            switchAfterAutoCorrection()
-            updateStatusIcon()
-        }
-        return true
     }
 
     private func wordEndReplacement(_ action: WordEndAction, _ ctx: WordCtx) -> (text: String, switchesLayout: Bool)? {
@@ -1134,6 +1125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 state.missingDictionary = Locale(identifier: L10n.languageCode)
                     .localizedString(forLanguageCode: required) ?? required.uppercased()
             }
+        }
+        if let failure = lastEditorFailure, failure.pid == app?.processIdentifier,
+           ProcessInfo.processInfo.systemUptime - failure.time < 10 {
+            state.editorNotice = failure.reason
         }
         return state.message
     }

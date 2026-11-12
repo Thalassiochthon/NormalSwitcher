@@ -36,6 +36,13 @@ enum LayoutSwitcher {
         return sourceID(source)
     }
 
+    static func currentSourceIsKeyboardLayout() -> Bool {
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceType) else { return false }
+        let type = Unmanaged<CFString>.fromOpaque(pointer).takeUnretainedValue()
+        return CFEqual(type, kTISTypeKeyboardLayout)
+    }
+
     /// Код языка ТЕКУЩЕЙ раскладки (BCP-47, например "ru"/"en"). nil если недоступен.
     /// Надёжнее парсинга ID: тот же признак, что использует сама ОС.
     static func currentLanguageCode() -> String? {

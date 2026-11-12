@@ -73,27 +73,31 @@ final class KeyboardMonitor: @unchecked Sendable {
 
     private var onAltTap: (() -> Void)?
     private var onAltReconvert: (() -> Void)?
-    /// With an active local tap, the poster inserts the edit before the physical space.
-    /// A nil poster is the deferred path for remote input or a passive tap.
-    var onWordBoundary: ((((CGEvent) -> Void)?) -> Void)?
+    struct WordBoundary {
+        let key: WordEndKey
+        let keys: [TypedKey]
+        let pid: pid_t?
+        let layoutID: String
+        let started: TimeInterval
+    }
+
+    /// The poster is valid only within the current tap callback.
+    var onWordBoundary: ((WordBoundary, ((CGEvent) -> Void)?) -> Void)?
+    var onWordStarted: ((pid_t) -> Void)?
+    var onInputReset: (() -> Void)?
     private var boundaryGeneration = 0
     private var wordAppPID: pid_t?
+    private var wordLayoutID = ""
     private var orderedSpaceEnabled = false
 
     private static var wantsOrderedSpace: Bool {
         let settings = SettingsManager.shared
-        return settings.autoSwitchEnabled && settings.autoConvert && settings.wordEndOnSpace
+        return settings.autoSwitchEnabled && settings.wordEndPipelineActive && settings.wordEndOnSpace
             && !settings.remoteDesktopMode
     }
 
     var needsSpaceTapReconfigure: Bool { isRunning && orderedSpaceEnabled != Self.wantsOrderedSpace }
-    /// 3.5.0b: Enter/Tab на конце слова — синхронно из колбэка tap'а. true — клавиша
-    /// придержана: приложение перепечатает слово и отправит её само (TextConverter.replaceTail).
-    var onWordEndSync: ((WordEndKey, [TypedKey], UInt16, CGEventFlags) -> Bool)?
-    /// Перехватывать ли Enter/Tab (tap в режиме .defaultTap). Кэш на start/reconfigure.
-    fileprivate var interceptBoundaryKeys = false
-    /// keyCode придержанной клавиши: её физический keyUp тоже глотаем, повтор шлёт пару сам.
-    private var heldKeyUp: UInt16?
+    private var interceptBoundaryKeys = false
     /// Активен ли tap (.defaultTap): тогда он держит каждое событие до ответа колбэка.
     private(set) var tapIsActive = false
     private var suspendDepth = 0
@@ -141,23 +145,20 @@ final class KeyboardMonitor: @unchecked Sendable {
             if let cfg = TriggerConfig.forSlot(slot) { detectors[slot] = TapDetector(config: cfg) }
         }
         rslog("Attempting to create event tap... (trigger=\(SettingsManager.shared.triggerKey) hotkeys=\(detectors.keys.map(\.rawValue).sorted()) capsLock=\(triggerConfig.isCapsLock))")
-        // 3.5.0b: Enter/Tab на конце слова придерживаем — нужен активный tap и keyUp в маске.
+        // Enter/Tab need an active tap to post the edit ahead of the original key.
         // Режим удалённого стола не мешает: проброшенные Screen Sharing клавиши приходят с
         // keyCode 0 и под Enter/Tab не попадают, а фокус в клиенте удалёнки отсекает
         // handleWordEndSync (shouldDeferToRemoteClient).
         let settings = SettingsManager.shared
         interceptBoundaryKeys = settings.wordEndOnEnter || settings.wordEndOnTab
-        heldKeyUp = nil
         let keyDownMask: CGEventMask = 1 << CGEventType.keyDown.rawValue
-        var mask: CGEventMask =
+        let mask: CGEventMask =
             keyDownMask
             | (1 << CGEventType.flagsChanged.rawValue)
             | (1 << CGEventType.leftMouseDown.rawValue)
             | (1 << CGEventType.rightMouseDown.rawValue)
-        if interceptBoundaryKeys { mask |= (1 << CGEventType.keyUp.rawValue) }
 
-        // Caps Lock и придержка Enter/Tab требуют активного tap (consume): подавить
-        // переключение регистра / придержать клавишу. Иначе listenOnly — не вмешиваемся в ввод.
+        // Caps Lock can be consumed. Automatic edits use the active tap to preserve ordering.
         let requiresActiveTap = triggerConfig.isCapsLock || interceptBoundaryKeys
         orderedSpaceEnabled = Self.wantsOrderedSpace
         var options: CGEventTapOptions = (requiresActiveTap || orderedSpaceEnabled) ? .defaultTap : .listenOnly
@@ -249,13 +250,15 @@ final class KeyboardMonitor: @unchecked Sendable {
     }
 
     /// issue #24 / скептик 3.2.0: системная смена раскладки (globe / Ctrl-Space) не проходит через
-    /// наш обработчик клавиш, поэтому буфер строки декодировался бы старой раскладкой. Сбрасываем
-    /// его (только строку — словный буфер трогаем как раньше).
+    /// наш обработчик клавиш. Сохраняем новое слово, если оно уже началось в новой раскладке.
     func resetLineBuffer() {
         lineKeys = []
+        if wordLayoutID != LayoutSwitcher.currentLayoutID() { fullReset() }
     }
 
     private func fullReset() {
+        boundaryGeneration &+= 1
+        onInputReset?()
         currentWordLength = 0
         wordBeforeBoundaryLength = 0
         boundaryCount = 0
@@ -264,60 +267,51 @@ final class KeyboardMonitor: @unchecked Sendable {
         lineKeys = []
     }
 
+    private func boundary(_ key: WordEndKey, keys: [TypedKey]) -> WordBoundary {
+        WordBoundary(key: key, keys: keys, pid: wordAppPID, layoutID: wordLayoutID,
+                     started: ProcessInfo.processInfo.systemUptime)
+    }
+
     private func fireWordBoundary(postBeforeSpace: ((CGEvent) -> Void)?) {
         boundaryGeneration &+= 1
         let settings = SettingsManager.shared
         guard settings.wordEndOnSpace, settings.wordEndPipelineActive else { return }
+        let candidate = boundary(.space, keys: prevWordKeys)
         if orderedSpaceEnabled, let postBeforeSpace {
-            onWordBoundary?(postBeforeSpace)
+            onWordBoundary?(candidate, postBeforeSpace)
         } else {
-            deferWordBoundary()
+            deferWordBoundary(candidate)
         }
     }
 
-    func deferWordBoundary() {
+    func deferWordBoundary(_ candidate: WordBoundary) {
         let generation = boundaryGeneration
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.boundaryGeneration == generation,
-                  self.boundaryCount > 0, !self.prevWordKeys.isEmpty else { return }
-            self.onWordBoundary?(nil)
+            guard let self, self.boundaryGeneration == generation, self.boundaryCount > 0,
+                  ProcessInfo.processInfo.systemUptime - candidate.started < 0.12 else { return }
+            self.onWordBoundary?(candidate, nil)
         }
     }
 
-    /// 3.5.0b: Enter/Tab на конце слова. Зовётся из колбэка tap'а ДО handleKeyDown.
-    /// Enter — без модификаторов или с Shift (перенос строки в мессенджерах), цифровой Enter
-    /// тоже; Tab — только без модификаторов (Shift+Tab — назад по полям). Cmd/Ctrl/Opt —
-    /// как раньше (сброс буфера). true — клавиша придержана.
-    fileprivate func holdBoundaryKey(keyCode: UInt16, flags: CGEventFlags, autorepeat: Bool) -> Bool {
-        // Ревью M4: новое нажатие той же клавиши — прежний keyUp уже не придёт (tap мог
-        // выключиться по таймауту), не глотаем чужой.
-        if heldKeyUp == keyCode, !autorepeat { heldKeyUp = nil }
-        guard interceptBoundaryKeys, !autorepeat, currentWordLength > 0, !currentWordKeys.isEmpty else { return false }
-        let mods = flags.intersection([.maskCommand, .maskControl, .maskAlternate])
+    /// Insert the edit ahead of the original Enter/Tab without consuming either key event.
+    fileprivate func processBoundaryKey(keyCode: UInt16, flags: CGEventFlags, autorepeat: Bool,
+                                        post: @escaping (CGEvent) -> Void) {
+        guard interceptBoundaryKeys, tapIsActive, !autorepeat, !currentWordKeys.isEmpty,
+              flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty else { return }
         let settings = SettingsManager.shared
         let key: WordEndKey
-        if keyCode == KC.enter || keyCode == KC.keypadEnter {
-            guard settings.wordEndOnEnter, mods.isEmpty else { return false }
+        switch keyCode {
+        case KC.enter, KC.keypadEnter:
+            guard settings.wordEndOnEnter else { return }
             key = .enter
-        } else if keyCode == KC.tab {
-            guard settings.wordEndOnTab, mods.isEmpty, !flags.contains(.maskShift) else { return false }
+        case KC.tab:
+            guard settings.wordEndOnTab, !flags.contains(.maskShift) else { return }
             key = .tab
-        } else {
-            return false
+        default:
+            return
         }
         prevWordBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        // Повтору нужны только Shift (перенос строки) и признак цифрового блока.
-        let repostFlags = flags.intersection([.maskShift, .maskNumericPad])
-        guard onWordEndSync?(key, currentWordKeys, keyCode, repostFlags) == true else { return false }
-        // То же, что handleKeyDown делает для любой клавиши: клавиша между модификаторами —
-        // не тап хоткея. Буфер сбрасываем, как Enter/Tab и раньше.
-        triggerArmed = false
-        disarmHotkeys()
-        lastTapTime = nil
-        keysTypedSinceConversion = true
-        heldKeyUp = keyCode
-        fullReset()
-        return true
+        onWordBoundary?(boundary(key, keys: currentWordKeys), post)
     }
 
     /// 3.5.0b (ревью C1): выполнить body с выключенным tap'ом. Активный tap держит каждое
@@ -334,17 +328,9 @@ final class KeyboardMonitor: @unchecked Sendable {
             if suspendDepth == 0 {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 fullReset()
-                heldKeyUp = nil
             }
         }
         return body()
-    }
-
-    /// keyUp придержанной клавиши глотаем: повтор шлёт свою пару down/up.
-    fileprivate func swallowHeldKeyUp(_ keyCode: UInt16) -> Bool {
-        guard let held = heldKeyUp, held == keyCode else { return false }
-        heldKeyUp = nil
-        return true
     }
 
     /// Сброс буфера при клике мышью — иначе backspace перепечатки сотрёт не то
@@ -405,7 +391,7 @@ final class KeyboardMonitor: @unchecked Sendable {
         }
 
         // Enter, Tab — полный сброс
-        if keyCode == KC.enter || keyCode == KC.tab {
+        if keyCode == KC.enter || keyCode == KC.keypadEnter || keyCode == KC.tab {
             fullReset()
             return
         }
@@ -436,8 +422,12 @@ final class KeyboardMonitor: @unchecked Sendable {
         }
 
         if KeyMapping.keycodeToEN[keyCode] != nil {
-            if orderedSpaceEnabled, currentWordLength == 0 {
+            if currentWordLength == 0 {
+                boundaryGeneration &+= 1
                 wordAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                wordLayoutID = LayoutSwitcher.currentLayoutID()
+                if let pid = wordAppPID, SettingsManager.shared.wordEndPipelineActive,
+                   !AutoSwitchPolicy.secureInputActive { onWordStarted?(pid) }
             }
             let tk = TypedKey(keyCode: keyCode, shift: flags.contains(.maskShift), caps: flags.contains(.maskAlphaShift))
             currentWordKeys.append(tk)
@@ -460,7 +450,7 @@ final class KeyboardMonitor: @unchecked Sendable {
             prevWordKeys = currentWordKeys
             let app = NSWorkspace.shared.frontmostApplication
             prevWordBundleID = app?.bundleIdentifier
-            if postBeforeSpace != nil, wordAppPID != app?.processIdentifier {
+            if wordAppPID != app?.processIdentifier {
                 fullReset()
                 return
             }
@@ -479,6 +469,11 @@ final class KeyboardMonitor: @unchecked Sendable {
     /// Работаем по самому символу: пробел — граница слова, backspace — откат,
     /// буква — кладём реальный символ в буфер (конверсия пойдёт по нему, см. convertKeys).
     private func handleForwardedChar(_ ch: Character) {
+        if currentWordLength == 0 {
+            boundaryGeneration &+= 1
+            wordAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            wordLayoutID = LayoutSwitcher.currentLayoutID()
+        }
         // Пробел — граница слова (как локальный keyCode space)
         if ch == " " {
             finishWord(postBeforeSpace: nil)
@@ -675,11 +670,9 @@ private func keyboardCallback(
         if event.getIntegerValueField(.keyboardEventAutorepeat) != 0, remote {
             return Unmanaged.passUnretained(event)
         }
-        // 3.5.0b: Enter/Tab на конце слова — придержать, приложение отправит клавишу само.
-        if monitor.holdBoundaryKey(keyCode: keyCode, flags: event.flags,
-                                            autorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0) {
-            return nil
-        }
+        monitor.processBoundaryKey(keyCode: keyCode, flags: event.flags,
+                                   autorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
+                                   post: { $0.tapPostEvent(proxy) })
         // Удалёнка: Screen Sharing пробрасывает символы как keyCode 0 + юникод-payload.
         // Читаем сам символ — без него буфер забивается keyCode 0 (= один символ → «фффффф»).
         var forwardedChar: Character? = nil
@@ -705,10 +698,6 @@ private func keyboardCallback(
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         if monitor.handleFlagsChanged(flags: event.flags, keyCode: keyCode) {
             return nil  // съедаем Caps Lock, чтобы не переключался регистр
-        }
-    } else if type == .keyUp {
-        if monitor.swallowHeldKeyUp(UInt16(event.getIntegerValueField(.keyboardEventKeycode))) {
-            return nil
         }
     } else if type == .leftMouseDown || type == .rightMouseDown {
         monitor.resetInputTracking()

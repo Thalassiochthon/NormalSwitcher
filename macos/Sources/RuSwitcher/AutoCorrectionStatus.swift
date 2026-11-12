@@ -13,6 +13,7 @@ struct AutoCorrectionStatus {
     var warmedUp = false
     var languagesKnown = false
     var missingDictionary: String?
+    var editorNotice: String?
 
     var message: String {
         if !masterEnabled { return taskText("NormalSwitcher is paused", "NormalSwitcher приостановлен") }
@@ -26,6 +27,7 @@ struct AutoCorrectionStatus {
         if !warmedUp { return taskText("Preparing dictionaries…", "Подготовка словарей…") }
         if !languagesKnown { return taskText("Check the layout pair in Settings", "Проверьте пару раскладок в настройках") }
         if let missingDictionary { return taskText("No dictionary: \(missingDictionary)", "Нет словаря: \(missingDictionary)") }
+        if let editorNotice { return editorNotice }
         let keys = triggers.joined(separator: " · ")
         return taskText("Checks words after: \(keys)", "Проверяет слова после: \(keys)")
     }
