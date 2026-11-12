@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0g",
-  "build": "83",
+  "version": "1.2.0h",
+  "build": "84",
   "dev": "",
-  "notes": "Поиск активного поля заранее и проверка исходного слова и курсора перед автоисправлением по пробелу, Enter и Tab.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0g",
-  "sha256": "478a55c4fe0be7530aa158e3b493acce6019d7c245013bb9f4d5c17f37cd3b8c",
-  "source_commit": "5c5445cb44326e4ff694e70c1a054e1838733681"
+  "notes": "Повторный поиск активного поля через Accessibility и поддержка редактируемых контейнеров.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0h",
+  "sha256": "cfd8ca7269c6e9af068c1db9b74c0ce72846519298cf024a1a3e7882ea80d20d",
+  "source_commit": "5246258e967f720e26c26a28c253c207f7954a4c"
 }
