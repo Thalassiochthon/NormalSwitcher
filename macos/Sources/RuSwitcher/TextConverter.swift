@@ -430,7 +430,7 @@ final class TextConverter {
         return (value as! AXUIElement)
     }
 
-    private static func axRange(_ value: AnyObject?) -> CFRange? {
+    private nonisolated static func axRange(_ value: AnyObject?) -> CFRange? {
         guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var range = CFRange()
         guard AXValueGetValue(value as! AXValue, .cfRange, &range), range.location >= 0, range.length >= 0 else {
@@ -479,16 +479,22 @@ final class TextConverter {
         preparingFocus = true
         accessibilityQueue.async { [weak self] in
             let deadline = ProcessInfo.processInfo.systemUptime + 0.075
-            let focus = Self.findOrderedFocus(pid: pid, deadline: deadline, searchWindow: true)
-            if focus == nil, canRequestAccessibility {
+            var focus = Self.findOrderedFocus(pid: pid, deadline: deadline, searchWindow: true)
+            let requestedAccessibility = focus == nil && canRequestAccessibility
+            if requestedAccessibility {
                 let app = AXUIElementCreateApplication(pid)
                 AXUIElementSetMessagingTimeout(app, 0.02)
-                _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+                let result = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+                rslog("editor-focus: pid=\(pid) accessibility-request=\(result.rawValue)")
+                if result == .success {
+                    focus = Self.findOrderedFocus(pid: pid, deadline: ProcessInfo.processInfo.systemUptime + 0.075,
+                                                  searchWindow: true)
+                }
             }
-            Task { @MainActor in
+            Task { @MainActor [focus] in
                 guard let self else { return }
                 self.preparingFocus = false
-                if focus == nil, canRequestAccessibility {
+                if requestedAccessibility {
                     self.lastAccessibilityRequest = (pid, now)
                 }
                 if self.focusGeneration == generation, let focus { self.preparedFocus = focus }
@@ -547,14 +553,23 @@ final class TextConverter {
             var owner: pid_t = 0
             guard AXUIElementGetPid(candidate, &owner) == .success, owner == pid else { return false }
             if requireFocused, attribute(candidate, kAXFocusedAttribute) as? Bool != true { return false }
-            guard let role = attribute(candidate, kAXRoleAttribute) as? String,
-                  editorRoles.contains(role) else { return false }
-            return attribute(candidate, "AXEditable") as? Bool != false
+            guard let role = attribute(candidate, kAXRoleAttribute) as? String else { return false }
+            let editable = attribute(candidate, "AXEditable") as? Bool
+            guard editable != false else { return false }
+            // A web editor can expose a focused contenteditable container instead of a text role.
+            // Require an explicit editable flag and a text selection range for that shape.
+            if !editorRoles.contains(role) {
+                guard editable == true, Self.axRange(attribute(candidate, kAXSelectedTextRangeAttribute)) != nil else {
+                    return false
+                }
+            }
+            return true
         }
 
         let app = AXUIElementCreateApplication(pid)
         let window = element(app, kAXFocusedWindowAttribute)
-        if let focused = element(app, kAXFocusedUIElementAttribute), editor(focused, requireFocused: false) {
+        let appFocus = element(app, kAXFocusedUIElementAttribute)
+        if let focused = appFocus, editor(focused, requireFocused: false) {
             return OrderedFocus(pid: pid, element: focused, window: window)
         }
         if AXIsProcessTrusted(),
@@ -563,11 +578,20 @@ final class TextConverter {
             return OrderedFocus(pid: pid, element: focused, window: window)
         }
         guard let window else { return nil }
-        if let focused = element(window, kAXFocusedUIElementAttribute), editor(focused, requireFocused: true) {
+        let windowFocus = element(window, kAXFocusedUIElementAttribute)
+        if let focused = windowFocus, editor(focused, requireFocused: true) {
             return OrderedFocus(pid: pid, element: focused, window: window)
         }
+        // AppKit can report the hosting view as focused while the view exposes the actual editor.
+        let containers = [appFocus, windowFocus].compactMap { $0 }
+        for container in containers {
+            if let focused = element(container, kAXFocusedUIElementAttribute),
+               editor(focused, requireFocused: true) {
+                return OrderedFocus(pid: pid, element: focused, window: window)
+            }
+        }
         guard searchWindow else { return nil }
-        var nodes = [window]
+        var nodes = containers + [window]
         var index = 0
         while index < nodes.count, ProcessInfo.processInfo.systemUptime + 0.006 < deadline {
             let node = nodes[index]
@@ -585,6 +609,9 @@ final class TextConverter {
                 }
             }
         }
+        let appRole = appFocus.flatMap { attribute($0, kAXRoleAttribute) as? String } ?? "unavailable"
+        let windowRole = windowFocus.flatMap { attribute($0, kAXRoleAttribute) as? String } ?? "unavailable"
+        rslog("editor-focus: pid=\(pid) app-role=\(appRole) window-role=\(windowRole) searched=\(index)")
         return nil
     }
 
