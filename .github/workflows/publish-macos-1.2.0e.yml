@@ -1,0 +1,27 @@
+name: Publish verified macOS 1.2.0e
+on:
+  push:
+    branches: [release/macos-1.2.0e]
+permissions:
+  contents: write
+concurrency:
+  group: normalswitcher-macos-beta-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Check the verified image and publish the beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp release/staged/NormalSwitcher-1.2.0e.dmg release/staged/beta.json "$RUNNER_TEMP/"
+          echo "acf934464aadbef6a2cd3f6350a44be666923d1ebaedc19d32828f67633274bc  $RUNNER_TEMP/NormalSwitcher-1.2.0e.dmg" | sha256sum -c
+          git checkout --detach 1f1e4a9674a7b16306db50e0329bbf430186f076
+          python3 scripts/publish_macos_beta.py "$RUNNER_TEMP/NormalSwitcher-1.2.0e.dmg" --manifest "$RUNNER_TEMP/beta.json"
