@@ -21,7 +21,7 @@ jobs:
       matrix:
         rid: [win-x64, win-arm64]
     env:
-      TEST_VERSION: ${{ github.ref == 'refs/heads/windows/macos-parity-audit' && format('0.2.7-beta.{0}', github.run_number) || '0.1.0' }}
+      TEST_VERSION: ${{ (github.ref == 'refs/heads/windows/macos-parity-audit' || github.head_ref == 'windows/macos-parity-audit') && format('0.2.7-beta.{0}', github.run_number) || '0.1.0' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -64,7 +64,7 @@ jobs:
           }
 
       - name: Build x64 beta installer for manual acceptance
-        if: matrix.rid == 'win-x64' && github.ref == 'refs/heads/windows/macos-parity-audit'
+        if: matrix.rid == 'win-x64' && (github.ref == 'refs/heads/windows/macos-parity-audit' || github.head_ref == 'windows/macos-parity-audit')
         shell: pwsh
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -72,7 +72,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload x64 beta installer
-        if: matrix.rid == 'win-x64' && github.ref == 'refs/heads/windows/macos-parity-audit'
+        if: matrix.rid == 'win-x64' && (github.ref == 'refs/heads/windows/macos-parity-audit' || github.head_ref == 'windows/macos-parity-audit')
         uses: actions/upload-artifact@v4
         with:
           name: NormalSwitcher-beta-installer-x64
