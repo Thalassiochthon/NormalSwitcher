@@ -1,12 +1,31 @@
 import SwiftUI
 
+enum QuickTaskEditingSession: Identifiable {
+    case new(QuickTask)
+    case existing(QuickTask)
+
+    var id: UUID { task.id }
+
+    var task: QuickTask {
+        switch self {
+        case .new(let task), .existing(let task): task
+        }
+    }
+
+    @MainActor func save(_ draft: QuickTask, in model: QuickTasks) -> Bool {
+        switch self {
+        case .new: model.add(draft)
+        case .existing: model.edit(draft)
+        }
+    }
+}
+
 struct QuickTaskList: View {
     @ObservedObject var model: QuickTasks
     @State private var completed = false
     @State private var query = ""
     @State private var selection: UUID?
-    @State private var editing: QuickTask?
-    @State private var editingIsNew = false
+    @State private var editing: QuickTaskEditingSession?
 
     private var visibleTasks: [QuickTask] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,8 +46,7 @@ struct QuickTaskList: View {
                 .pickerStyle(.segmented)
                 Spacer()
                 Button {
-                    editingIsNew = true
-                    editing = QuickTask(text: "")
+                    editing = .new(QuickTask(text: ""))
                 } label: {
                     Label(taskText("New Task", "Новая задача"), systemImage: "plus")
                 }
@@ -97,8 +115,8 @@ struct QuickTaskList: View {
             }
         }
         .padding(14)
-        .sheet(item: $editing) { task in
-            QuickTaskEditor(task: task, isNew: editingIsNew, model: model) { saved in
+        .sheet(item: $editing) { session in
+            QuickTaskEditor(session: session, model: model) { saved in
                 if let saved {
                     completed = model.tasks.first(where: { $0.id == saved.id })?.completed ?? saved.completed
                     query = ""
@@ -111,24 +129,23 @@ struct QuickTaskList: View {
 
     private func open(_ task: QuickTask) {
         selection = task.id
-        editingIsNew = false
-        editing = task
+        editing = .existing(task)
     }
 }
 
 private struct QuickTaskEditor: View {
     @State private var task: QuickTask
     private let original: QuickTask
-    private let isNew: Bool
+    private let session: QuickTaskEditingSession
     @ObservedObject var model: QuickTasks
     let close: (QuickTask?) -> Void
     @State private var confirmDelete = false
     @State private var confirmDiscard = false
 
-    init(task: QuickTask, isNew: Bool, model: QuickTasks, close: @escaping (QuickTask?) -> Void) {
-        _task = State(initialValue: task)
-        original = task
-        self.isNew = isNew
+    init(session: QuickTaskEditingSession, model: QuickTasks, close: @escaping (QuickTask?) -> Void) {
+        _task = State(initialValue: session.task)
+        original = session.task
+        self.session = session
         self.model = model
         self.close = close
     }
@@ -157,7 +174,7 @@ private struct QuickTaskEditor: View {
                 }.keyboardShortcut(.cancelAction)
                 Button(taskText("Save", "Сохранить")) {
                     task.title = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if isNew ? model.add(task) : model.edit(task) { close(task) }
+                    if session.save(task, in: model) { close(task) }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(task.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

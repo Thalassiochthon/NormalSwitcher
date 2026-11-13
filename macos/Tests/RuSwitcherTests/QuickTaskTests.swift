@@ -89,14 +89,28 @@ struct QuickTaskTests {
         }
     }
 
+    @Test func newEditorSavesOnFirstAttempt() throws {
+        try withStore { url, key, store in
+            let model = QuickTasks(store: store)
+            let session = QuickTaskEditingSession.new(QuickTask(text: ""))
+            var draft = session.task
+            draft.title = "New task"
+            #expect(session.save(draft, in: model))
+            #expect(model.errorMessage == nil)
+            let persisted = try QuickTaskStore(file: url, key: { _ in key }).load()
+            #expect(persisted == [draft])
+        }
+    }
+
     @Test func staleEditorCannotResurrectDeletedTask() throws {
         try withStore { _, _, store in
             let model = QuickTasks(store: store)
             var task = QuickTask(text: "Original")
             #expect(model.add(task))
+            let session = QuickTaskEditingSession.existing(task)
             #expect(model.delete(task.id))
             task.text = "Edited before Undo"
-            #expect(!model.edit(task))
+            #expect(!session.save(task, in: model))
             #expect(model.tasks.isEmpty)
             #expect(model.errorMessage != nil)
         }
