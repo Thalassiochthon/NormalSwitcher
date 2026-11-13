@@ -49,8 +49,7 @@ internal static class Converter
         IntPtr activeHkl = LayoutSwitcher.Current();
         var keys = buffer.CurrentWord;
         IntPtr sourceHkl = KeyMapper.TextLayout(keys, activeHkl);
-        IntPtr targetHkl = LayoutSwitcher.ConversionTargets(sourceHkl).FirstOrDefault();
-        if (targetHkl == IntPtr.Zero) return false;
+        if (LayoutSwitcher.CorrectionTarget(sourceHkl) is not { } targetHkl) return false;
 
         // Split off trailing real punctuation (kept as typed).
         int coreCount = keys.Count;
@@ -121,7 +120,7 @@ internal static class Converter
     public static bool ConvertSelection(bool smart)
     {
         IntPtr sourceHkl = LayoutSwitcher.Current();
-        if (LayoutSwitcher.Opposite() is not { } targetHkl) return false;
+        if (LayoutSwitcher.CorrectionTarget(sourceHkl) is not { } targetHkl) return false;
 
         return TransformSelection(sel => Settings.Current.ConvertByText ? KeyMapper.ConvertByText(sel, sourceHkl, targetHkl)
             : smart ? SmartConvert.Selection(sel, sourceHkl, targetHkl)

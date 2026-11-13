@@ -105,8 +105,8 @@ internal static class Program
         var switchDetector = new TriggerDetector(settings.SwitchTrigger);
         switchDetector.Triggered += () =>
         {
-            if (enabled && settings.SwitchTriggerEnabled && LayoutSwitcher.Opposite() is { } opp)
-                LayoutSwitcher.SwitchTo(opp);
+            if (enabled && settings.SwitchTriggerEnabled && LayoutSwitcher.NextInstalled() is { } next)
+                LayoutSwitcher.SwitchTo(next);
         };
 
         tray.TriggerActivated += () =>
@@ -228,7 +228,7 @@ internal static class Program
                     QueueManualCorrection();
                     break;
                 case ShortcutAction.Switch:
-                    if (LayoutSwitcher.Opposite() is { } opposite) LayoutSwitcher.SwitchTo(opposite);
+                    if (LayoutSwitcher.NextInstalled() is { } next) LayoutSwitcher.SwitchTo(next);
                     ResetInput();
                     break;
                 case ShortcutAction.FirstLayout:

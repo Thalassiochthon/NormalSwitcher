@@ -27,9 +27,18 @@ internal static class LayoutSwitcher
         return GetKeyboardLayout(tid);
     }
 
-    public static IntPtr? Opposite()
+    public static IntPtr? NextInstalled() => NextInstalled(Current(), Installed());
+
+    internal static IntPtr? NextInstalled(IntPtr current, IntPtr[] installed)
     {
-        foreach (var layout in ConversionTargets(Current())) return layout;
+        if (installed.Length < 2) return null;
+        int index = Array.IndexOf(installed, current);
+        return installed[(index + 1) % installed.Length];
+    }
+
+    internal static IntPtr? CorrectionTarget(IntPtr current)
+    {
+        foreach (var layout in ConversionTargets(current)) return layout;
         return null;
     }
 
