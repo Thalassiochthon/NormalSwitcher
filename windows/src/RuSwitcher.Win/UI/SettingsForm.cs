@@ -61,6 +61,7 @@ internal sealed class SettingsForm : Form
         _navigation = Stack();
         _sidebar.Controls.Add(_navigation);
         var brand = TextLabel("NormalSwitcher", 11, FontStyle.Bold);
+        brand.Dock = DockStyle.Fill;
         brand.Padding = new Padding(8, 0, 0, 18);
         brand.ForeColor = _accent;
         _navigation.Controls.Add(brand);
@@ -300,6 +301,8 @@ internal sealed class SettingsForm : Form
             width = Math.Max(width, text.Width + item.Padding.Horizontal + item.Margin.Horizontal);
             if (item is Button button)
                 button.Height = Math.Max(LogicalToDeviceUnits(39), text.Height + LogicalToDeviceUnits(12));
+            else
+                item.MinimumSize = new Size(0, text.Height + item.Padding.Vertical);
         }
         _navigationColumn.Width = Math.Max(LogicalToDeviceUnits(194),
             width + _sidebar.Padding.Horizontal + LogicalToDeviceUnits(24));

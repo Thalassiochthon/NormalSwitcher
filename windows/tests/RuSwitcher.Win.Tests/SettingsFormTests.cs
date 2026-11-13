@@ -57,8 +57,12 @@ public class SettingsFormTests
                 foreach (Control item in navigation.Controls)
                 {
                     var text = TextRenderer.MeasureText(graphics, item.Text, item.Font);
-                    Assert.True(item.ClientSize.Width >= text.Width + item.Padding.Horizontal, item.Text);
-                    Assert.True(item.ClientSize.Height >= text.Height + item.Padding.Vertical, item.Text);
+                    int requiredWidth = text.Width + item.Padding.Horizontal;
+                    int requiredHeight = text.Height + item.Padding.Vertical;
+                    Assert.True(item.ClientSize.Width >= requiredWidth,
+                        $"{item.Text}: width {item.ClientSize.Width}, requires {requiredWidth}, navigation {navigation.Width}");
+                    Assert.True(item.ClientSize.Height >= requiredHeight,
+                        $"{item.Text}: height {item.ClientSize.Height}, requires {requiredHeight}");
                 }
                 var normal = form.ClientSize;
                 CheckPages(form, expectFit: normal.Height >= form.LogicalToDeviceUnits(570));
