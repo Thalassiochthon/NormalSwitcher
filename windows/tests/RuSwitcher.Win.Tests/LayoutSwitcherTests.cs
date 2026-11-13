@@ -17,6 +17,18 @@ public class LayoutSwitcherTests
     }
 
     [Fact]
+    public void SwitchUsesTheSystemOrderWithTwoOrFourLayouts()
+    {
+        IntPtr[] installed = [new(0x0C0A), new(0x0419), new(0x040C), new(0x0409)];
+        foreach (int count in new[] { 2, 4 })
+        {
+            var cycle = installed[..count];
+            for (int index = 0; index < count; index++)
+                Assert.Equal((IntPtr?)cycle[(index + 1) % count], LayoutSwitcher.NextInstalled(cycle[index], cycle));
+        }
+    }
+
+    [Fact]
     public void SwitchDoesNothingWithOneLayout()
     {
         var russian = new IntPtr(0x0419);

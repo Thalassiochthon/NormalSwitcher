@@ -76,8 +76,13 @@ internal sealed class SettingsForm : Form
         _pages = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         content.Controls.Add(_pages, 0, 1);
 
-        IntPtr[] layouts = [IntPtr.Zero, .. LayoutSwitcher.Installed()];
-        string[] layoutNames = [L10n.T("settings.layout.auto"), .. layouts.Skip(1).Select(LayoutIcon.Name)];
+        var installedLayouts = LayoutSwitcher.Installed();
+        IntPtr[] layouts = [IntPtr.Zero, .. installedLayouts];
+        string[] installedNames = installedLayouts.Select(LayoutIcon.Name).ToArray();
+        string[] layoutNames = [L10n.T("settings.layout.auto"), .. installedNames];
+        var switchingOrder = Hint("settings.layout.none");
+        if (installedNames.Length > 0)
+            switchingOrder.Text = L10n.T("settings.layout.cycle", string.Join(" → ", installedNames));
         string[] soundNames = Sound.Choices.Select(sound => L10n.T("settings.sound." + sound)).ToArray();
         string[] layoutSoundNames = [L10n.T("settings.sound.inherit"), .. soundNames];
         Control LayoutSoundChoice(IntPtr layout)
@@ -100,8 +105,9 @@ internal sealed class SettingsForm : Form
                 Array.IndexOf(Sound.Choices.ToArray(), Sound.Resolve(s.LayoutSound)),
                 index => { s.LayoutSound = Sound.Choices[index]; s.Save(); },
                 index => Sound.Play(Sound.Choices[index])),
-            .. layouts.Skip(1).Select(LayoutSoundChoice),
+            .. installedLayouts.Select(LayoutSoundChoice),
             Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }),
+            switchingOrder,
             Choice("settings.layout.first", layoutNames, Array.IndexOf(layouts, new IntPtr(s.FirstLayout)),
                 index => { s.FirstLayout = layouts[index].ToInt64(); s.Save(); }),
             Choice("settings.layout.second", layoutNames, Array.IndexOf(layouts, new IntPtr(s.SecondLayout)),

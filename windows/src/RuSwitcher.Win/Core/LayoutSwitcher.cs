@@ -15,8 +15,8 @@ internal static class LayoutSwitcher
         int n = GetKeyboardLayoutList(0, null);
         if (n <= 0) return Array.Empty<IntPtr>();
         var list = new IntPtr[n];
-        GetKeyboardLayoutList(n, list);
-        return list;
+        int copied = GetKeyboardLayoutList(n, list);
+        return list.Take(copied).Where(layout => layout != IntPtr.Zero).Distinct().ToArray();
     }
 
     /// <summary>HKL of the layout active in the focused window's thread.</summary>
