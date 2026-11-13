@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0h",
-  "build": "84",
+  "version": "1.2.0i",
+  "build": "85",
   "dev": "",
-  "notes": "Повторный поиск активного поля через Accessibility и поддержка редактируемых контейнеров.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0h",
-  "sha256": "cfd8ca7269c6e9af068c1db9b74c0ce72846519298cf024a1a3e7882ea80d20d",
-  "source_commit": "5246258e967f720e26c26a28c253c207f7954a4c"
+  "notes": "Исправлено сохранение новой задачи с первого нажатия.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0i",
+  "sha256": "03b0f1289143aa93dcdc369d1ab63cc62fa04e77867491f1bb254d627b5d2314",
+  "source_commit": "aef33f828f7ade18d96829fb972833c2d1ac54b9"
 }
