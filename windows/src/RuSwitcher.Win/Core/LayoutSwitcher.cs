@@ -15,8 +15,8 @@ internal static class LayoutSwitcher
         int n = GetKeyboardLayoutList(0, null);
         if (n <= 0) return Array.Empty<IntPtr>();
         var list = new IntPtr[n];
-        GetKeyboardLayoutList(n, list);
-        return list;
+        int copied = GetKeyboardLayoutList(n, list);
+        return list.Take(copied).Where(layout => layout != IntPtr.Zero).Distinct().ToArray();
     }
 
     /// <summary>HKL of the layout active in the focused window's thread.</summary>
@@ -27,9 +27,18 @@ internal static class LayoutSwitcher
         return GetKeyboardLayout(tid);
     }
 
-    public static IntPtr? Opposite()
+    public static IntPtr? NextInstalled() => NextInstalled(Current(), Installed());
+
+    internal static IntPtr? NextInstalled(IntPtr current, IntPtr[] installed)
     {
-        foreach (var layout in ConversionTargets(Current())) return layout;
+        if (installed.Length < 2) return null;
+        int index = Array.IndexOf(installed, current);
+        return installed[(index + 1) % installed.Length];
+    }
+
+    internal static IntPtr? CorrectionTarget(IntPtr current)
+    {
+        foreach (var layout in ConversionTargets(current)) return layout;
         return null;
     }
 
@@ -66,6 +75,5 @@ internal static class LayoutSwitcher
     {
         if (hwnd != IntPtr.Zero)
             PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl);
-        Sound.Switch();   // issue #7: optional cue on layout change
     }
 }

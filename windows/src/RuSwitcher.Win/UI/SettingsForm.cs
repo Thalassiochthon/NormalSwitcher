@@ -9,7 +9,11 @@ namespace RuSwitcher.Win.UI;
 /// <summary>Settings shared with the tray and the running keyboard detectors.</summary>
 internal sealed class SettingsForm : Form
 {
+    private readonly ColumnStyle _navigationColumn;
+    private readonly Panel _sidebar;
     private readonly TableLayoutPanel _navigation;
+    private readonly RowStyle _headingRow;
+    private readonly RowStyle _footerRow;
     private readonly Panel _pages;
     private readonly Label _heading;
     private readonly Color _accent = SystemInformation.HighContrast ? SystemColors.HotTrack : Color.FromArgb(91, 52, 166);
@@ -24,7 +28,7 @@ internal sealed class SettingsForm : Form
     public event Action? AppearanceChanged;
     public event Action<bool>? KeyboardEnabledChanged;
 
-    public SettingsForm(ClipboardHistory history, GlobalShortcuts globalShortcuts, string logPath, bool keyboardHookReady)
+    public SettingsForm(ClipboardHistory history, GlobalShortcuts globalShortcuts, string logPath, bool keyboardHookReady, Action? openTasks = null)
     {
         var s = Settings.Current;
         Text = L10n.T("settings.title");
@@ -42,29 +46,33 @@ internal sealed class SettingsForm : Form
         SuspendLayout();
 
         var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 194));
+        _navigationColumn = new ColumnStyle(SizeType.Absolute, 194);
+        shell.ColumnStyles.Add(_navigationColumn);
         shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(shell);
 
-        var sidebar = new Panel
+        _sidebar = new Panel
         {
-            Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = _navigationSurface,
+            Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = _navigationSurface, AutoScroll = true,
             Padding = new Padding(12, 26, 12, 12)
         };
-        shell.Controls.Add(sidebar, 0, 0);
+        shell.Controls.Add(_sidebar, 0, 0);
         _navigation = Stack();
-        sidebar.Controls.Add(_navigation);
+        _sidebar.Controls.Add(_navigation);
         var brand = TextLabel("NormalSwitcher", 11, FontStyle.Bold);
+        brand.Dock = DockStyle.Fill;
         brand.Padding = new Padding(8, 0, 0, 18);
         brand.ForeColor = _accent;
         _navigation.Controls.Add(brand);
 
         var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
+        _headingRow = new RowStyle(SizeType.Absolute, 84);
+        _footerRow = new RowStyle(SizeType.Absolute, 64);
+        content.RowStyles.Add(_headingRow);
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+        content.RowStyles.Add(_footerRow);
         shell.Controls.Add(content, 1, 0);
 
         _heading = TextLabel("", 22, FontStyle.Bold);
@@ -76,17 +84,38 @@ internal sealed class SettingsForm : Form
         _pages = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         content.Controls.Add(_pages, 0, 1);
 
-        IntPtr[] layouts = [IntPtr.Zero, .. LayoutSwitcher.Installed()];
-        string[] layoutNames = [L10n.T("settings.layout.auto"), .. layouts.Skip(1).Select(LayoutIcon.Name)];
-        AddPage("general",
+        var installedLayouts = LayoutSwitcher.Installed();
+        IntPtr[] layouts = [IntPtr.Zero, .. installedLayouts];
+        string[] installedNames = installedLayouts.Select(LayoutIcon.Name).ToArray();
+        string[] layoutNames = [L10n.T("settings.layout.auto"), .. installedNames];
+        var switchingOrder = Hint("settings.layout.none");
+        if (installedNames.Length > 0)
+            switchingOrder.Text = L10n.T("settings.layout.cycle", string.Join(" → ", installedNames));
+        string[] soundNames = Sound.Choices.Select(sound => L10n.T("settings.sound." + sound)).ToArray();
+        string[] layoutSoundNames = [L10n.T("settings.sound.inherit"), .. soundNames];
+        Control LayoutSoundChoice(IntPtr layout)
+        {
+            long key = Sound.LayoutKey(layout);
+            int selected = s.LayoutSounds.TryGetValue(key, out var saved)
+                ? 1 + Array.IndexOf(Sound.Choices.ToArray(), Sound.Resolve(saved)) : 0;
+            return Choice(LayoutIcon.Name(layout), layoutSoundNames, selected, index =>
+            {
+                if (index == 0) s.LayoutSounds.Remove(key);
+                else s.LayoutSounds[key] = Sound.Choices[index - 1];
+                s.Save();
+            }, index => Sound.Play(index == 0 ? s.LayoutSound : Sound.Choices[index - 1]));
+        }
+        AddPage("general", [
             Check("tray.enable", s.KeyboardEnabled, value => KeyboardEnabledChanged?.Invoke(value)),
-            Check("settings.startup", AutoStart.IsEnabled(), AutoStart.SetEnabled),
+            StartupCheck(),
             Check("settings.sound", s.SoundOnSwitch, value => { s.SoundOnSwitch = value; s.Save(); }),
-            Choice("settings.sound.choice", Sound.Choices.Select(sound => L10n.T("settings.sound." + sound)).ToArray(),
+            Choice("settings.sound.choice", soundNames,
                 Array.IndexOf(Sound.Choices.ToArray(), Sound.Resolve(s.LayoutSound)),
                 index => { s.LayoutSound = Sound.Choices[index]; s.Save(); },
                 index => Sound.Play(Sound.Choices[index])),
+            .. installedLayouts.Select(LayoutSoundChoice),
             Check("settings.perapp", s.PerAppLayout, value => { s.PerAppLayout = value; s.Save(); }),
+            switchingOrder,
             Choice("settings.layout.first", layoutNames, Array.IndexOf(layouts, new IntPtr(s.FirstLayout)),
                 index => { s.FirstLayout = layouts[index].ToInt64(); s.Save(); }),
             Choice("settings.layout.second", layoutNames, Array.IndexOf(layouts, new IntPtr(s.SecondLayout)),
@@ -97,11 +126,12 @@ internal sealed class SettingsForm : Form
                 {
                     s.UiLanguage = new[] { "", "en", "ru" }[index];
                     s.Save();
-                }));
+                })]);
 
         var triggers = Enum.GetValues<TriggerKind>().Select(TrayIcon.TriggerName).ToArray();
-        var configurable = Enum.GetValues<ShortcutAction>().Select(action =>
-            ShortcutButton("hotkeys." + action, () => globalShortcuts.Get(action), chord => globalShortcuts.Set(action, chord)));
+        Control Shortcut(ShortcutAction action) =>
+            ShortcutButton("hotkeys." + action, () => globalShortcuts.Get(action), chord => globalShortcuts.Set(action, chord),
+                () => globalShortcuts.IsRegistered(action));
         AddPage("hotkeys",
             [Choice("settings.trigger", triggers, (int)s.Trigger, index =>
             {
@@ -117,7 +147,8 @@ internal sealed class SettingsForm : Form
                     s.Save();
                     SwitchChanged?.Invoke();
                 }),
-            .. configurable]);
+            .. Enum.GetValues<ShortcutAction>()
+                .Where(action => action is not (ShortcutAction.OpenTasks or ShortcutAction.CaptureTask)).Select(Shortcut)]);
 
         var exceptions = new Button { Text = L10n.T("settings.exceptions"), AutoSize = true };
         exceptions.Click += (_, _) => { using var form = new ExceptionsForm(); form.ShowDialog(this); };
@@ -148,7 +179,8 @@ internal sealed class SettingsForm : Form
                 ShowClipboardError("clipboard.storageError");
             }
         };
-        var shortcut = ShortcutButton("clipboard.shortcut", () => history.DisplayShortcut, history.SetCustomShortcut);
+        var shortcut = ShortcutButton("clipboard.shortcut", () => history.DisplayShortcut, history.SetCustomShortcut,
+            () => !s.ClipboardHistoryEnabled || history.ShortcutRegistered);
         var enabled = new CheckBox { Text = L10n.T("clipboard.enable"), AutoSize = true, Checked = s.ClipboardHistoryEnabled };
         enabled.Click += (_, _) =>
         {
@@ -159,7 +191,10 @@ internal sealed class SettingsForm : Form
             }
             persist.Enabled = enabled.Checked;
         };
-        AddPage("clipboard", enabled, shortcut, persist,
+        var tasks = new Button { Text = L10n.T("tasks.title"), AutoSize = true };
+        tasks.Click += (_, _) => { openTasks?.Invoke(); Close(); };
+        AddPage("clipboard", enabled, shortcut, persist, tasks,
+            Shortcut(ShortcutAction.OpenTasks), Shortcut(ShortcutAction.CaptureTask),
             Hint("clipboard.hint"));
 
         var openLog = new Button { Text = L10n.T("settings.log.open"), AutoSize = true };
@@ -182,6 +217,7 @@ internal sealed class SettingsForm : Form
             Check("settings.wholeline", s.ConvertWholeLine, value => { s.ConvertWholeLine = value; s.Save(); }),
             Check("settings.smart", s.SmartConversion, value => { s.SmartConversion = value; s.Save(); }),
             Check("settings.byText", s.ConvertByText, value => { s.ConvertByText = value; s.Save(); }),
+            Check("upd.beta", s.ReceiveBetaUpdates, value => { s.ReceiveBetaUpdates = value; Updater.UpdatePreferenceChanged(); }),
             Check("settings.updates", s.CheckUpdatesEnabled, value => { s.CheckUpdatesEnabled = value; s.Save(); }),
             Check("settings.remote", s.RemoteDesktopMode, value => { s.RemoteDesktopMode = value; s.Save(); }),
             Check("settings.log.enable", s.DebugLogging, value => { s.DebugLogging = value; s.Save(); }),
@@ -232,7 +268,7 @@ internal sealed class SettingsForm : Form
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
-        FitWorkingArea();
+        if (!e.Cancel && IsHandleCreated) BeginInvoke((Action)FitWorkingArea);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -255,8 +291,29 @@ internal sealed class SettingsForm : Form
 
     private void FitWorkingArea()
     {
+        // Absolute table rows and columns can keep their design-time pixel sizes on a scaled display.
+        // Measure the live fonts and recalculate the absolute sizes from logical units.
+        using var graphics = CreateGraphics();
+        int width = 0;
+        foreach (Control item in _navigation.Controls)
+        {
+            var text = TextRenderer.MeasureText(graphics, item.Text, item.Font);
+            width = Math.Max(width, text.Width + item.Padding.Horizontal + item.Margin.Horizontal);
+            if (item is Button button)
+                button.Height = Math.Max(LogicalToDeviceUnits(39), text.Height + LogicalToDeviceUnits(12));
+            else
+                item.MinimumSize = new Size(0, text.Height + item.Padding.Vertical);
+        }
+        _navigationColumn.Width = Math.Max(LogicalToDeviceUnits(194),
+            width + _sidebar.Padding.Horizontal + LogicalToDeviceUnits(24));
+        _headingRow.Height = Math.Max(LogicalToDeviceUnits(84),
+            TextRenderer.MeasureText(graphics, _heading.Text, _heading.Font).Height + LogicalToDeviceUnits(16));
+        _footerRow.Height = Math.Max(LogicalToDeviceUnits(64),
+            CancelButton is Control close ? close.GetPreferredSize(Size.Empty).Height + LogicalToDeviceUnits(20) : 0);
+
         var area = Screen.FromControl(this).WorkingArea;
-        var preferred = SizeFromClientSize(LogicalToDeviceUnits(new Size(760, 570)));
+        int preferredWidth = (int)_navigationColumn.Width + LogicalToDeviceUnits(566);
+        var preferred = SizeFromClientSize(new Size(preferredWidth, LogicalToDeviceUnits(570)));
         Size = new Size(Math.Min(preferred.Width, area.Width), Math.Min(preferred.Height, area.Height));
         Location = new Point(
             Math.Clamp(Left, area.Left, area.Right - Width),
@@ -357,7 +414,7 @@ internal sealed class SettingsForm : Form
             Padding = new Padding(0, 4, 0, 0)
         };
         details.Controls.Add(TextLabel("NormalSwitcher", 17, FontStyle.Bold));
-        details.Controls.Add(TextLabel(L10n.T("settings.about.version", Updater.Current.ToString(3)), 10));
+        details.Controls.Add(TextLabel(L10n.T("settings.about.version", Updater.CurrentRelease), 10));
         header.Controls.AddRange([logo, details]);
         return header;
     }
@@ -369,15 +426,17 @@ internal sealed class SettingsForm : Form
         return row;
     }
 
-    private Control ShortcutButton(string key, Func<KeyChord?> current, Func<KeyChord?, bool> save)
+    private Control ShortcutButton(string key, Func<KeyChord?> current, Func<KeyChord?, bool> save, Func<bool>? registered = null)
     {
-        var button = new Button { Text = current()?.ToString() ?? L10n.T("settings.off"), AutoSize = true };
+        string Display() => current() is not { } chord ? L10n.T("settings.off") :
+            registered?.Invoke() == false ? L10n.T("tasks.shortcutUnavailable", chord) : chord.ToString();
+        var button = new Button { Text = Display(), AutoSize = true };
         button.Click += (_, _) =>
         {
             using var recorder = new ShortcutRecorder();
             if (recorder.ShowDialog(this) != DialogResult.OK) return;
             if (save(recorder.Chord))
-                button.Text = current()?.ToString() ?? L10n.T("settings.off");
+                button.Text = Display();
             else
                 MessageBox.Show(this, L10n.T("clipboard.hotkeyError"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         };
@@ -385,6 +444,18 @@ internal sealed class SettingsForm : Form
         var title = new Label { Text = L10n.T(key), AutoSize = true, Margin = new Padding(0, 6, 8, 0) };
         row.Controls.AddRange([title, button]);
         return row;
+    }
+
+    private CheckBox StartupCheck()
+    {
+        var check = new CheckBox { Text = L10n.T("settings.startup"), AutoSize = true, Checked = AutoStart.IsEnabled() };
+        check.Click += (_, _) =>
+        {
+            if (AutoStart.SetEnabled(check.Checked)) return;
+            check.Checked = AutoStart.IsEnabled();
+            MessageBox.Show(this, L10n.T("settings.startup.error"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        };
+        return check;
     }
 
     private static CheckBox Check(string key, bool value, Action<bool> onChange)

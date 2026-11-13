@@ -8,15 +8,17 @@ namespace RuSwitcher.Win.Tests;
 
 public class SettingsFormTests
 {
-    [Fact]
-    public async Task FixedSettingsWindowKeepsEverySectionWithinItsWidth()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FixedSettingsWindowKeepsEverySectionWithinItsWidth(bool largerNavigationText)
     {
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var ui = new Thread(() =>
         {
             try
             {
-                CheckLayouts();
+                CheckLayouts(largerNavigationText);
                 finished.SetResult();
             }
             catch (Exception error)
@@ -29,7 +31,7 @@ public class SettingsFormTests
         await finished.Task.WaitAsync(TimeSpan.FromSeconds(30));
     }
 
-    private static void CheckLayouts()
+    private static void CheckLayouts(bool largerNavigationText)
     {
         var settings = Settings.Current;
         string previousLanguage = settings.UiLanguage;
@@ -41,10 +43,27 @@ public class SettingsFormTests
                 using var history = new ClipboardHistory(IntPtr.Zero, _ => { });
                 using var shortcuts = new GlobalShortcuts(IntPtr.Zero);
                 using var form = new SettingsForm(history, shortcuts, "", keyboardHookReady: true);
+                var brand = Descendants(form).OfType<Label>().First(label => label.Text == "NormalSwitcher");
+                var navigation = Assert.IsType<TableLayoutPanel>(brand.Parent);
+                using var largerFont = new Font("Segoe UI", 17F, FontStyle.Bold);
+                if (largerNavigationText)
+                    foreach (Control item in navigation.Controls) item.Font = largerFont;
+
                 form.Show();
                 Application.DoEvents();
                 Assert.Equal(FormBorderStyle.FixedDialog, form.FormBorderStyle);
                 Assert.False(form.MaximizeBox);
+                using var graphics = form.CreateGraphics();
+                foreach (Control item in navigation.Controls)
+                {
+                    var text = TextRenderer.MeasureText(graphics, item.Text, item.Font);
+                    int requiredWidth = text.Width + item.Padding.Horizontal;
+                    int requiredHeight = text.Height + item.Padding.Vertical;
+                    Assert.True(item.ClientSize.Width >= requiredWidth,
+                        $"{item.Text}: width {item.ClientSize.Width}, requires {requiredWidth}, navigation {navigation.Width}");
+                    Assert.True(item.ClientSize.Height >= requiredHeight,
+                        $"{item.Text}: height {item.ClientSize.Height}, requires {requiredHeight}");
+                }
                 var normal = form.ClientSize;
                 CheckPages(form, expectFit: normal.Height >= form.LogicalToDeviceUnits(570));
 

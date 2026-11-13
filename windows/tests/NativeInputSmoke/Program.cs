@@ -41,7 +41,19 @@ internal static class Program
                 Tap(0x20);
                 await Until(() => first.Text == "NormalSwitcher ", "Space expansion");
 
+                string prefix = new string('x', 4500) + " ";
+                first.Text = prefix;
+                first.SelectionStart = prefix.Length;
+                TypeShortcutWord();
+                await Until(() => first.Text == prefix + "zz", "word beyond the native 4096-character boundary");
+                Tap(0x20);
+                Tap(0x41);
+                await Until(() => first.Text == prefix + "NormalSwitcher a", "rapid input with verified trailing letter");
+
                 first.Clear();
+                // Clear() changes the fixture programmatically. Send a navigation key so the
+                // app also starts with an empty typing buffer after the previous trailing 'a'.
+                Tap(0x24);
                 TypeShortcutWord();
                 await Until(() => first.Text == "zz", "ordinary keyboard input before Enter");
                 Tap(0x0D);
@@ -65,6 +77,15 @@ internal static class Program
                 Console.WriteLine("Unicode packet input passed.");
                 first.Clear();
                 Console.WriteLine("Space, Enter, Tab, clipboard history paste and custom shortcut passed.");
+                Clipboard.SetText("Acceptance task\r\nMultiline text");
+                string taskFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "NormalSwitcher", "tasks.dat");
+                CheckRegistrationAndDispatch(27, 0x56, 7); // Save clipboard as task.
+                await Until(() => File.Exists(taskFile), "encrypted task saved by shortcut");
+                CheckRegistrationAndDispatch(26, 0x54); // Open tasks.
+                await Until(() => FindWindowW(null, "Tasks") != IntPtr.Zero, "task window");
+                var taskWindow = FindWindowW(null, "Tasks");
+                PostMessageW(taskWindow, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE.
                 result = 0;
             }
             catch (Exception error)
@@ -120,11 +141,11 @@ internal static class Program
         Tap(0x5A);
     }
 
-    private static void CheckRegistrationAndDispatch(int id, uint key)
+    private static void CheckRegistrationAndDispatch(int id, uint key, uint modifiers = 6)
     {
         // Synthetic modifier chords on hosted Windows are not equivalent to a physical global
         // shortcut. Verify Windows reserved the chord, then exercise the same WM_HOTKEY handler.
-        if (RegisterHotKey(IntPtr.Zero, 900, 6, key))
+        if (RegisterHotKey(IntPtr.Zero, 900, modifiers, key))
         {
             UnregisterHotKey(IntPtr.Zero, 900);
             throw new InvalidOperationException("NormalSwitcher did not register the configured shortcut");
@@ -132,7 +153,7 @@ internal static class Program
         if (Marshal.GetLastWin32Error() != 1409)
             throw new InvalidOperationException("Could not verify the global shortcut registration");
         IntPtr tray = FindWindowW("NormalSwitcherTrayWindow", "NormalSwitcher");
-        if (tray == IntPtr.Zero || !PostMessageW(tray, 0x0312, (IntPtr)id, (IntPtr)((key << 16) | 6)))
+        if (tray == IntPtr.Zero || !PostMessageW(tray, 0x0312, (IntPtr)id, (IntPtr)((key << 16) | modifiers)))
             throw new InvalidOperationException("Could not dispatch the registered shortcut");
     }
 

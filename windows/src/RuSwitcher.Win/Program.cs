@@ -45,12 +45,13 @@ internal static class Program
         { try { Log("THREAD-EX: " + e.Exception); } catch { /* ignore */ } };
 
         var settings = Settings.Current;
+        AutoStart.RepairMissingExecutable();
         var buffer = new KeystrokeBuffer();
         bool enabled = settings.KeyboardEnabled;
         long inputGeneration = 0;
         InputTarget? wordTarget = null, undoTarget = null;
         (InputTarget Target, string Text, int NextVariant)? caseCycle = null;
-        (List<TypedKey> Keys, InputTarget Target, long Generation, uint DeferredKey)? pendingAuto = null;
+        (List<TypedKey> Keys, InputTarget Target, long Generation, uint DeferredKey, List<TypedKey> Tail)? pendingAuto = null;
         (InputTarget Target, long Generation)? pendingTrigger = null;
 
         void ResetInput()
@@ -105,8 +106,8 @@ internal static class Program
         var switchDetector = new TriggerDetector(settings.SwitchTrigger);
         switchDetector.Triggered += () =>
         {
-            if (enabled && settings.SwitchTriggerEnabled && LayoutSwitcher.Opposite() is { } opp)
-                LayoutSwitcher.SwitchTo(opp);
+            if (enabled && settings.SwitchTriggerEnabled && LayoutSwitcher.NextInstalled() is { } next)
+                LayoutSwitcher.SwitchTo(next);
         };
 
         tray.TriggerActivated += () =>
@@ -149,16 +150,20 @@ internal static class Program
 
         tray.AutoConvertActivated += async () =>
         {
+            if (pendingAuto is { DeferredKey: 0 }) await Task.Delay(12);
             var request = pendingAuto;
             pendingAuto = null;
             if (request is not { } word) return;
             bool deferred = word.DeferredKey != 0;
-            if (!deferred) await Task.Delay(12); // Let the target handle the Space before checking its text.
+            string tail = KeyMapper.ConvertWord(word.Tail, word.Target.Layout);
             try
             {
+                if (tail.Length != word.Tail.Count) return;
                 if (await AutoConverter.TryConvertWordAsync(word.Keys, word.Target,
                         () => settings.HasAutomaticEdits && CanEdit(word.Target, word.Generation, checkLayout: true),
-                        deferred ? "" : " "))
+                        deferred ? "" : " " + tail, preserveLayout: tail.Length > 0,
+                        diagnostic: settings.DebugLogging ? reason =>
+                            Log($"auto: app={AppLayoutTracker.ProcessName(word.Target.Foreground) ?? "unknown"} result={reason}") : null))
                     undoTarget = word.Target;
             }
             finally
@@ -172,11 +177,30 @@ internal static class Program
         };
         tray.EnabledChanged += on => { enabled = on; ResetInput(); Log($"enabled = {on}"); };
         bool keyboardHookReady = false;
+        tray.AutoStatus = () => L10n.T(
+            !enabled || !settings.HasAutomaticEdits ? "auto.status.off" :
+            !keyboardHookReady ? "auto.status.hook" :
+            !settings.WordEndOnSpace && !settings.WordEndOnEnter && !settings.WordEndOnTab ? "auto.status.boundary" :
+            settings.AutoConvert && !Dict.Available ? "auto.status.dictionary" :
+            "auto.status.ready");
+        using var tasks = new UI.QuickTasksWindow();
+        void OpenTasks()
+        {
+            if (!tray.ClipboardHistory.IsOpen && Form.ActiveForm?.Modal != true) tasks.Open();
+        }
+        void AddTask(string? text)
+        {
+            if (tasks.AddText(text)) tasks.Notify(L10n.T("tasks.added"));
+            else tasks.Notify(L10n.T("tasks.captureFailed"));
+        }
+        tray.TasksRequested += OpenTasks;
         UI.SettingsForm? currentSettings = null;
         tray.SettingsRequested += () =>
         {
             if (currentSettings != null) { currentSettings.Activate(); return; }
-            using var form = new UI.SettingsForm(tray.ClipboardHistory, tray.Shortcuts, logPath, keyboardHookReady);
+            bool openTasksAfterSettings = false;
+            using var form = new UI.SettingsForm(tray.ClipboardHistory, tray.Shortcuts, logPath, keyboardHookReady,
+                () => openTasksAfterSettings = true);
             currentSettings = form;
             form.AppearanceChanged += tray.RefreshAppearance;
             form.KeyboardEnabledChanged += tray.SetEnabled;
@@ -184,13 +208,22 @@ internal static class Program
             form.SwitchChanged += () => switchDetector.Kind = settings.SwitchTrigger;
             try { form.ShowDialog(); } // modal; the message loop keeps pumping the hook + tray
             finally { currentSettings = null; }
+            if (openTasksAfterSettings) OpenTasks();
         };
         tray.QuitRequested += () => Log("quit requested");
         tray.Show("NormalSwitcher");
         tray.ClipboardHistory.Pasted += ResetInput;
+        tray.ClipboardHistory.TaskRequested = AddTask;
         tray.Shortcuts.Activated += async action =>
         {
             Log($"shortcut action={action}");
+            if (action == ShortcutAction.OpenTasks) { OpenTasks(); return; }
+            if (action == ShortcutAction.CaptureTask)
+            {
+                try { AddTask(ClipboardHistory.ReadAllowedText()); }
+                catch (System.Runtime.InteropServices.ExternalException) { AddTask(null); }
+                return;
+            }
             if (!enabled || InputTarget.Capture() is not { IsPasswordEdit: false } target) return;
             switch (action)
             {
@@ -198,7 +231,7 @@ internal static class Program
                     QueueManualCorrection();
                     break;
                 case ShortcutAction.Switch:
-                    if (LayoutSwitcher.Opposite() is { } opposite) LayoutSwitcher.SwitchTo(opposite);
+                    if (LayoutSwitcher.NextInstalled() is { } nextLayout) LayoutSwitcher.SwitchTo(nextLayout);
                     ResetInput();
                     break;
                 case ShortcutAction.FirstLayout:
@@ -270,6 +303,7 @@ internal static class Program
             if (!enabled) return false;
             ReplayBoundary();
             inputGeneration++;
+            var previousWord = pendingAuto;
             pendingAuto = null;
 
             detector.OnKeyDown(vk);
@@ -303,14 +337,21 @@ internal static class Program
                 if ((space || deferred) && tray.PostAutoConvert())
                 {
                     deferredKey = deferred ? vk : 0;
-                    pendingAuto = (new List<TypedKey>(buffer.CurrentWord), target, inputGeneration, deferredKey);
+                    pendingAuto = (new List<TypedKey>(buffer.CurrentWord), target, inputGeneration, deferredKey, []);
                 }
             }
             if (KeystrokeBuffer.IsTypingKey(vk) || packet is { } literal && !char.IsWhiteSpace(literal) && !char.IsControl(literal))
             {
                 bool shift = IsDown(VK_SHIFT);
                 bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-                buffer.Append(new TypedKey(vk, sc, shift, caps, packet));
+                var typed = new TypedKey(vk, sc, shift, caps, packet);
+                buffer.Append(typed);
+                if (pendingAuto == null && previousWord is { DeferredKey: 0 } pending &&
+                    pending.Target == target && pending.Tail.Count < 32 && !shift && !caps)
+                {
+                    pending.Tail.Add(typed);
+                    pendingAuto = (pending.Keys, pending.Target, inputGeneration, 0, pending.Tail);
+                }
             }
             else buffer.Reset();
             return deferredKey != 0;

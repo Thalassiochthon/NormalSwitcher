@@ -37,14 +37,19 @@ jobs:
       - name: Resolve version
         id: ver
         shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
-            $v = '${{ github.event.inputs.version }}'
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $v = $env:REQUESTED_VERSION
           } else {
             $v = '${{ github.ref_name }}' -replace '^win-v',''
           }
+          if ($v -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$') { throw 'Invalid release version' }
+          $beta = $v.Contains('-beta.')
+          "beta=$($beta.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          $pre = if ($v -like '0.*') { 'true' } else { 'false' }
+          $pre = if ($beta -or $v -like '0.*') { 'true' } else { 'false' }
           "prerelease=$pre" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "version=$v prerelease=$pre"
 
@@ -170,7 +175,7 @@ jobs:
           $ghArgs = @("win-v$v") + (Get-ChildItem assets\* | ForEach-Object { $_.FullName }) +
                     @('--title', "NormalSwitcher for Windows $v", '--notes-file', 'notes.md',
                       '--target', '${{ github.sha }}')
-          if ('${{ steps.ver.outputs.prerelease }}' -eq 'true') { $ghArgs += '--prerelease' }
+          if ('${{ steps.ver.outputs.prerelease }}' -eq 'true') { $ghArgs += @('--prerelease', '--latest=false') }
           gh release create @ghArgs
 
       - name: Announce the verified installer to installed copies
@@ -189,23 +194,37 @@ jobs:
 
           $feed = [ordered]@{
             version = $version
-            url = $release.html_url
+            # Windows 0.2.6 validates this historical owner literally.
+            url = "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v$version"
             notes = (Get-Content "$env:RUNNER_TEMP/windows-update-notes.txt" -Raw).Trim()
             sha256 = $hash
           } | ConvertTo-Json
-          $endpoint = "$repo/contents/windows/version.json"
+          $beta = '${{ steps.ver.outputs.beta }}' -eq 'true'
+          $feedFile = if ($beta) { 'version-beta.json' } else { 'version.json' }
+          $endpoint = "$repo/contents/windows/$feedFile"
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $current = gh api "${endpoint}?ref=windows-preview" | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or -not $current.sha) { throw 'Could not read Windows update channel' }
-            $previous = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($current.content)) | ConvertFrom-Json
-            if ([version]$previous.version -ge [version]$version) { exit 0 }
+            $current = $null
+            $currentJson = gh api "${endpoint}?ref=windows-preview" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              $current = $currentJson | ConvertFrom-Json
+              if (-not $current.sha) { throw 'Could not read Windows update channel' }
+              $previous = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($current.content)) | ConvertFrom-Json
+              $old = $previous.version -split '-beta\.'
+              $new = $version -split '-beta\.'
+              if ([version]$old[0] -gt [version]$new[0]) { exit 0 }
+              if ([version]$old[0] -eq [version]$new[0] -and
+                  (-not $beta -or [int]$old[1] -ge [int]$new[1])) { exit 0 }
+            } elseif (-not $beta -or ($currentJson -join ' ') -notmatch 'HTTP 404') {
+              throw 'Could not read Windows update channel'
+            }
 
             $body = @{
               branch = 'windows-preview'
-              sha = $current.sha
               message = "Announce NormalSwitcher $version to Windows users"
               content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$feed`n"))
-            } | ConvertTo-Json
+            }
+            if ($current) { $body.sha = $current.sha }
+            $body = $body | ConvertTo-Json
             $inputFile = "$env:RUNNER_TEMP/windows-update-feed.json"
             $body | Set-Content -Encoding utf8NoBOM $inputFile
             gh api --method PUT "$endpoint" --input "$inputFile" --silent
