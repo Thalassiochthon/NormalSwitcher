@@ -1,0 +1,29 @@
+name: Publish verified macOS 1.2.0i
+on:
+  push:
+    branches: [release/macos-1.2.0i]
+permissions:
+  contents: write
+concurrency:
+  group: normalswitcher-macos-beta-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Verify and publish the signed disk image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="$RUNNER_TEMP/NormalSwitcher-1.2.0i.dmg"
+          gh api "repos/$GITHUB_REPOSITORY/git/blobs/52cfbadb7f8e1d66760a9ad1e075946088d33103" --jq .content | base64 -d > "$asset"
+          printf '%s  %s\n' '03b0f1289143aa93dcdc369d1ab63cc62fa04e77867491f1bb254d627b5d2314' "$asset" | sha256sum -c -
+          printf '%s\n' '{"version":"1.2.0i","build":"85","dev":"","notes":"Исправлено сохранение новой задачи с первого нажатия."}' > "$RUNNER_TEMP/beta.json"
+          git checkout --detach aef33f828f7ade18d96829fb972833c2d1ac54b9
+          python3 scripts/publish_macos_beta.py "$asset" --manifest "$RUNNER_TEMP/beta.json"
