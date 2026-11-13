@@ -45,6 +45,7 @@ internal static class Program
         { try { Log("THREAD-EX: " + e.Exception); } catch { /* ignore */ } };
 
         var settings = Settings.Current;
+        AutoStart.RepairMissingExecutable();
         var buffer = new KeystrokeBuffer();
         bool enabled = settings.KeyboardEnabled;
         long inputGeneration = 0;
@@ -160,7 +161,9 @@ internal static class Program
                 if (tail.Length != word.Tail.Count) return;
                 if (await AutoConverter.TryConvertWordAsync(word.Keys, word.Target,
                         () => settings.HasAutomaticEdits && CanEdit(word.Target, word.Generation, checkLayout: true),
-                        deferred ? "" : " " + tail, preserveLayout: tail.Length > 0))
+                        deferred ? "" : " " + tail, preserveLayout: tail.Length > 0,
+                        diagnostic: settings.DebugLogging ? reason =>
+                            Log($"auto: app={AppLayoutTracker.ProcessName(word.Target.Foreground) ?? "unknown"} result={reason}") : null))
                     undoTarget = word.Target;
             }
             finally
@@ -228,7 +231,7 @@ internal static class Program
                     QueueManualCorrection();
                     break;
                 case ShortcutAction.Switch:
-                    if (LayoutSwitcher.NextInstalled() is { } next) LayoutSwitcher.SwitchTo(next);
+                    if (LayoutSwitcher.NextInstalled() is { } nextLayout) LayoutSwitcher.SwitchTo(nextLayout);
                     ResetInput();
                     break;
                 case ShortcutAction.FirstLayout:

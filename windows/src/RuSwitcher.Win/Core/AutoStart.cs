@@ -14,28 +14,44 @@ internal static class AutoStart
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(ValueName) is not null;
+            return key?.GetValue(ValueName) is string command && File.Exists(ExecutablePath(command));
         }
         catch { return false; }
     }
 
-    public static void SetEnabled(bool on)
+    public static void RepairMissingExecutable()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+            if (key?.GetValue(ValueName) is string command && !File.Exists(ExecutablePath(command))
+                && Environment.ProcessPath is { } executable)
+                key.SetValue(ValueName, $"\"{executable}\"");
+        }
+        catch { /* Registry may be managed by Windows policy. */ }
+    }
+
+    private static string ExecutablePath(string command) => command.Trim().Trim('"');
+
+    public static bool SetEnabled(bool on)
     {
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true)
                             ?? Registry.CurrentUser.CreateSubKey(RunKey);
-            if (key is null) return;
+            if (key is null) return false;
             if (on)
             {
                 string? exe = Environment.ProcessPath;
-                if (!string.IsNullOrEmpty(exe)) key.SetValue(ValueName, $"\"{exe}\"");
+                if (string.IsNullOrEmpty(exe)) return false;
+                key.SetValue(ValueName, $"\"{exe}\"");
             }
             else
             {
                 key.DeleteValue(ValueName, throwOnMissingValue: false);
             }
+            return true;
         }
-        catch { /* policy / access — ignore */ }
+        catch { return false; }
     }
 }

@@ -17,7 +17,7 @@ internal static class AutoConverter
     /// converted word followed by a space. Deferring off the hook thread keeps the callback O(1) and
     /// avoids the LowLevelHooksTimeout / silent-unhook trap (COM + SendInput must not run in-callback).
     /// Returns true if it converted; on "keep" it does nothing (the word + space stay as typed).</summary>
-    public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ", bool preserveLayout = false)
+    public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ", bool preserveLayout = false, Action<string>? diagnostic = null)
     {
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
         var settings = Settings.Current;
@@ -99,9 +99,14 @@ internal static class AutoConverter
                 await Task.Delay(12);
                 matched = stillCurrent() && input.HasPlainTextAtCaret(expected);
             }
-            if (!matched || !stillCurrent()
-                || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
+            string? failure = !stillCurrent() ? "focus-or-input-changed" : !matched ? "unverified-editor-text" : null;
+            if (failure is null && !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
+                failure = "input-injection-failed";
+            if (failure is not null)
+            {
+                diagnostic?.Invoke(failure);
                 return false;
+            }
 
             if (!preserveLayout)
             {

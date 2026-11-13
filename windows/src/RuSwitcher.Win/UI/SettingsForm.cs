@@ -99,7 +99,7 @@ internal sealed class SettingsForm : Form
         }
         AddPage("general", [
             Check("tray.enable", s.KeyboardEnabled, value => KeyboardEnabledChanged?.Invoke(value)),
-            Check("settings.startup", AutoStart.IsEnabled(), AutoStart.SetEnabled),
+            StartupCheck(),
             Check("settings.sound", s.SoundOnSwitch, value => { s.SoundOnSwitch = value; s.Save(); }),
             Choice("settings.sound.choice", soundNames,
                 Array.IndexOf(Sound.Choices.ToArray(), Sound.Resolve(s.LayoutSound)),
@@ -415,6 +415,18 @@ internal sealed class SettingsForm : Form
         var title = new Label { Text = L10n.T(key), AutoSize = true, Margin = new Padding(0, 6, 8, 0) };
         row.Controls.AddRange([title, button]);
         return row;
+    }
+
+    private CheckBox StartupCheck()
+    {
+        var check = new CheckBox { Text = L10n.T("settings.startup"), AutoSize = true, Checked = AutoStart.IsEnabled() };
+        check.Click += (_, _) =>
+        {
+            if (AutoStart.SetEnabled(check.Checked)) return;
+            check.Checked = AutoStart.IsEnabled();
+            MessageBox.Show(this, L10n.T("settings.startup.error"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        };
+        return check;
     }
 
     private static CheckBox Check(string key, bool value, Action<bool> onChange)
