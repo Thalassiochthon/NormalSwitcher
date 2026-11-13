@@ -9,7 +9,11 @@ namespace RuSwitcher.Win.UI;
 /// <summary>Settings shared with the tray and the running keyboard detectors.</summary>
 internal sealed class SettingsForm : Form
 {
+    private readonly ColumnStyle _navigationColumn;
+    private readonly Panel _sidebar;
     private readonly TableLayoutPanel _navigation;
+    private readonly RowStyle _headingRow;
+    private readonly RowStyle _footerRow;
     private readonly Panel _pages;
     private readonly Label _heading;
     private readonly Color _accent = SystemInformation.HighContrast ? SystemColors.HotTrack : Color.FromArgb(91, 52, 166);
@@ -42,19 +46,20 @@ internal sealed class SettingsForm : Form
         SuspendLayout();
 
         var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 194));
+        _navigationColumn = new ColumnStyle(SizeType.Absolute, 194);
+        shell.ColumnStyles.Add(_navigationColumn);
         shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         Controls.Add(shell);
 
-        var sidebar = new Panel
+        _sidebar = new Panel
         {
-            Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = _navigationSurface,
+            Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = _navigationSurface, AutoScroll = true,
             Padding = new Padding(12, 26, 12, 12)
         };
-        shell.Controls.Add(sidebar, 0, 0);
+        shell.Controls.Add(_sidebar, 0, 0);
         _navigation = Stack();
-        sidebar.Controls.Add(_navigation);
+        _sidebar.Controls.Add(_navigation);
         var brand = TextLabel("NormalSwitcher", 11, FontStyle.Bold);
         brand.Padding = new Padding(8, 0, 0, 18);
         brand.ForeColor = _accent;
@@ -62,9 +67,11 @@ internal sealed class SettingsForm : Form
 
         var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
         content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
+        _headingRow = new RowStyle(SizeType.Absolute, 84);
+        _footerRow = new RowStyle(SizeType.Absolute, 64);
+        content.RowStyles.Add(_headingRow);
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+        content.RowStyles.Add(_footerRow);
         shell.Controls.Add(content, 1, 0);
 
         _heading = TextLabel("", 22, FontStyle.Bold);
@@ -260,7 +267,7 @@ internal sealed class SettingsForm : Form
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
-        FitWorkingArea();
+        if (!e.Cancel && IsHandleCreated) BeginInvoke((Action)FitWorkingArea);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -283,8 +290,27 @@ internal sealed class SettingsForm : Form
 
     private void FitWorkingArea()
     {
+        // Absolute table rows and columns can keep their design-time pixel sizes on a scaled display.
+        // Measure the live fonts and recalculate the absolute sizes from logical units.
+        using var graphics = CreateGraphics();
+        int width = 0;
+        foreach (Control item in _navigation.Controls)
+        {
+            var text = TextRenderer.MeasureText(graphics, item.Text, item.Font);
+            width = Math.Max(width, text.Width + item.Padding.Horizontal + item.Margin.Horizontal);
+            if (item is Button button)
+                button.Height = Math.Max(LogicalToDeviceUnits(39), text.Height + LogicalToDeviceUnits(12));
+        }
+        _navigationColumn.Width = Math.Max(LogicalToDeviceUnits(194),
+            width + _sidebar.Padding.Horizontal + LogicalToDeviceUnits(24));
+        _headingRow.Height = Math.Max(LogicalToDeviceUnits(84),
+            TextRenderer.MeasureText(graphics, _heading.Text, _heading.Font).Height + LogicalToDeviceUnits(16));
+        _footerRow.Height = Math.Max(LogicalToDeviceUnits(64),
+            CancelButton is Control close ? close.GetPreferredSize(Size.Empty).Height + LogicalToDeviceUnits(20) : 0);
+
         var area = Screen.FromControl(this).WorkingArea;
-        var preferred = SizeFromClientSize(LogicalToDeviceUnits(new Size(760, 570)));
+        int preferredWidth = (int)_navigationColumn.Width + LogicalToDeviceUnits(566);
+        var preferred = SizeFromClientSize(new Size(preferredWidth, LogicalToDeviceUnits(570)));
         Size = new Size(Math.Min(preferred.Width, area.Width), Math.Min(preferred.Height, area.Height));
         Location = new Point(
             Math.Clamp(Left, area.Left, area.Right - Width),
