@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startedAsLoginItem = Self.launchedAsLoginItem()   // Apple-событие запуска доступно только сейчас
-        clipboardHistory.configure()
+        clipboardHistory.configure(restoreInBackground: true)
         clipboardHistory.onAddTask = { [weak self] in self?.quickTasks.addFromClipboard($0) }
         quickTasks.readClipboard = { [weak self] in self?.clipboardHistory.currentText() }
         quickTasks.start()

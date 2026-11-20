@@ -11,6 +11,7 @@ final class SettingsManager: @unchecked Sendable {
     private enum Keys {
         static let clipboardHistoryEnabled = "com.antonjas.normalswitcher.clipboardHistory.enabled"
         static let clipboardHistoryPersistent = "com.antonjas.normalswitcher.clipboardHistory.persistent"
+        static let clipboardImageLimit = "com.antonjas.normalswitcher.clipboardHistory.imageLimit"
         static let clipboardHistoryShortcut = "com.antonjas.normalswitcher.clipboardHistory.shortcut"
         static let autoSwitch = "com.ruswitcher.autoSwitch"
         static let layout1ID = "com.ruswitcher.layout1ID"
@@ -107,6 +108,14 @@ final class SettingsManager: @unchecked Sendable {
     var clipboardHistoryEnabled: Bool {
         get { defaults.bool(forKey: Keys.clipboardHistoryEnabled) }
         set { defaults.set(newValue, forKey: Keys.clipboardHistoryEnabled) }
+    }
+
+    var clipboardImageLimit: Int {
+        get {
+            let saved = defaults.object(forKey: Keys.clipboardImageLimit) as? Int ?? ClipboardHistoryStore.defaultImageLimit
+            return min(max(0, saved), ClipboardHistoryStore.maxImageLimit)
+        }
+        set { defaults.set(min(max(0, newValue), ClipboardHistoryStore.maxImageLimit), forKey: Keys.clipboardImageLimit) }
     }
 
     var clipboardHistoryPersistent: Bool {

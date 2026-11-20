@@ -61,8 +61,10 @@ final class ClipboardHistory {
     private let pasteboard = NSPasteboard.general
     private let converter: TextConverter
     private let keyboardMonitor: KeyboardMonitor
-    private let model = ClipboardHistoryModel()
-    private var entries: [String] { model.entries }
+    private let worker = ClipboardHistoryWorker()
+    private var state = ClipboardHistoryWorker.State(entries: [], storageFailed: false, revision: 0)
+    private var queuedBytes = 0
+    private var entries: [ClipboardEntry] { state.entries }
     private var changeCount = 0
     private var timer: Timer?
     private var hotkey: EventHotKeyRef?
@@ -80,11 +82,21 @@ final class ClipboardHistory {
     }
 
     @discardableResult
-    func configure() -> Bool {
+    func configure(restoreInBackground: Bool = false) -> Bool {
         let settings = SettingsManager.shared
         if settings.clipboardHistoryEnabled {
-            guard timer == nil else { return true }
-            let restored = model.setPersistent(settings.clipboardHistoryPersistent)
+            let imageLimit = settings.clipboardImageLimit
+            let starting = timer == nil
+            let persist = settings.clipboardHistoryPersistent
+            if starting && restoreInBackground {
+                worker.restore(imageLimit: imageLimit, persistent: persist) { [weak self] next in self?.apply(next) }
+            } else {
+                apply(worker.change {
+                    $0.setImageLimit(imageLimit)
+                    if starting { $0.setPersistent(persist) }
+                })
+            }
+            guard starting else { return !state.storageFailed }
             changeCount = pasteboard.changeCount
             let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.capture() }
@@ -92,7 +104,7 @@ final class ClipboardHistory {
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
             _ = registerShortcut(settings.clipboardHistoryShortcut)
-            return restored
+            return !state.storageFailed
         } else {
             stop()
             return clear()
@@ -112,30 +124,60 @@ final class ClipboardHistory {
 
     @discardableResult
     func updatePersistence() -> Bool {
-        let result = model.setPersistent(SettingsManager.shared.clipboardHistoryEnabled &&
-                                         SettingsManager.shared.clipboardHistoryPersistent)
-        historyWindow?.update(entries: entries, storageFailed: model.storageFailed)
-        return result
+        let persist = SettingsManager.shared.clipboardHistoryEnabled && SettingsManager.shared.clipboardHistoryPersistent
+        apply(worker.change { $0.setPersistent(persist) })
+        return !state.storageFailed
+    }
+
+    private func apply(_ next: ClipboardHistoryWorker.State) {
+        guard next.revision >= state.revision else { return }
+        state = next
+        historyWindow?.update(entries: entries, storageFailed: state.storageFailed)
+    }
+
+    private func eligibleItem() -> NSPasteboardItem? {
+        guard !converter.hasTemporaryClipboardContents, let items = pasteboard.pasteboardItems,
+              items.count == 1, let item = items.first, !item.types.contains(.fileURL),
+              Self.ignoredTypes.allSatisfy({ !item.types.contains($0) }) else { return nil }
+        return item
+    }
+
+    static func input(from item: NSPasteboardItem, imagesEnabled: Bool) -> ClipboardHistoryWorker.Input? {
+        let formats: [NSPasteboard.PasteboardType] = [.png, .init("public.jpeg"), .tiff]
+        if imagesEnabled, let type = formats.first(where: item.types.contains),
+           let data = item.data(forType: type), !data.isEmpty, data.count <= ClipboardImage.maxInputBytes {
+            return .image(data)
+        }
+        guard let text = item.string(forType: .string), !text.isEmpty,
+              text.utf8.count <= maxTextBytes else { return nil }
+        return .text(text)
     }
 
     private func capture() {
-        let observedCount = pasteboard.changeCount
-        guard observedCount != changeCount else { return }
-        changeCount = observedCount
-        guard let text = currentText(maxBytes: Self.maxTextBytes), entries.first != text else { return }
-        model.capture(text)
-        historyWindow?.update(entries: entries, storageFailed: model.storageFailed)
+        let observed = pasteboard.changeCount
+        guard observed != changeCount else { return }
+        // Retry on the next tick while a large previous capture is still being processed.
+        guard queuedBytes <= ClipboardImage.maxInputBytes else { return }
+        changeCount = observed
+        guard let item = eligibleItem(),
+              let input = Self.input(from: item, imagesEnabled: SettingsManager.shared.clipboardImageLimit > 0),
+              pasteboard.changeCount == observed else { return }
+        let byteCount: Int
+        switch input {
+        case .image(let data): byteCount = data.count
+        case .text(let text): byteCount = text.utf8.count
+        }
+        queuedBytes += byteCount
+        worker.capture(input) { [weak self] next in
+            guard let self else { return }
+            self.queuedBytes -= byteCount
+            if let next { self.apply(next) }
+        }
     }
 
     func currentText(maxBytes: Int? = nil) -> String? {
         let version = pasteboard.changeCount
-        guard !converter.hasTemporaryClipboardContents,
-              let items = pasteboard.pasteboardItems, items.count == 1,
-              let item = items.first,
-              Self.ignoredTypes.allSatisfy({ !item.types.contains($0) }),
-              !item.types.contains(.fileURL),
-              let text = item.string(forType: .string),
-              !text.isEmpty,
+        guard let text = eligibleItem()?.string(forType: .string), !text.isEmpty,
               maxBytes.map({ text.utf8.count <= $0 }) ?? true,
               pasteboard.changeCount == version else { return nil }
         return text
@@ -156,12 +198,11 @@ final class ClipboardHistory {
         } else {
             emptyMessage = L10n.clipboardHistoryEmpty
         }
-        let browser = ClipboardHistoryWindow(entries: entries, storageFailed: model.storageFailed,
+        let browser = ClipboardHistoryWindow(entries: entries, storageFailed: state.storageFailed,
                                               emptyMessage: emptyMessage, onAddTask: onAddTask,
                                               onRetry: { [weak self] in
             guard let self else { return }
-            _ = self.model.retry()
-            self.historyWindow?.update(entries: self.entries, storageFailed: self.model.storageFailed)
+            self.apply(self.worker.change { $0.retry() })
         }, onClear: { [weak self] in
             guard let self else { return }
             if !self.clear() {
@@ -187,17 +228,17 @@ final class ClipboardHistory {
 
     @discardableResult
     private func clear() -> Bool {
-        guard model.clear() else { return false }
+        apply(worker.change { $0.clear() })
+        guard !state.storageFailed else { return false }
         changeCount = pasteboard.changeCount
         historyWindow?.close()
         return true
     }
 
-    private func paste(_ text: String, into target: NSRunningApplication?) {
+    private func paste(_ entry: ClipboardEntry, into target: NSRunningApplication?) {
         guard SettingsManager.shared.clipboardHistoryEnabled,
               !converter.hasTemporaryClipboardContents else { return }
-        pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else { return }
+        guard entry.write(to: pasteboard) else { return }
         // Leave the entry available for manual paste if the original target cannot take focus.
         guard let target, AXIsProcessTrusted() else {
             rslog("Clipboard history: entry copied; paste target or accessibility permission unavailable")

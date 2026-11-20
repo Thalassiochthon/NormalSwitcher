@@ -13,8 +13,8 @@ struct ClipboardHistoryWindowTests {
         let entries = (0..<30).map { "Entry \($0)\nFull text 👋" }
         var captured: String?
         var pasted: String?
-        let controller = ClipboardHistoryWindow(entries: entries, storageFailed: false,
-            emptyMessage: "Empty", onAddTask: { captured = $0 }, onRetry: {}, onClear: {}) { pasted = $0 }
+        let controller = ClipboardHistoryWindow(entries: entries.map(ClipboardEntry.text), storageFailed: false,
+            emptyMessage: "Empty", onAddTask: { captured = $0 }, onRetry: {}, onClear: {}) { pasted = $0.text }
         defer { controller.close() }
         let panel = try #require(controller.window)
         panel.layoutIfNeeded()
@@ -42,7 +42,7 @@ struct ClipboardHistoryWindowTests {
         _ = NSApplication.shared
         let entries = (0..<30).map { "Entry \($0)" }
         var captured: String?
-        let controller = ClipboardHistoryWindow(entries: entries, storageFailed: false,
+        let controller = ClipboardHistoryWindow(entries: entries.map(ClipboardEntry.text), storageFailed: false,
             emptyMessage: "Empty", onAddTask: { captured = $0 }, onRetry: {}, onClear: {}) { _ in }
         defer { controller.close() }
         let views = descendants(try #require(controller.window?.contentView))
@@ -53,7 +53,7 @@ struct ClipboardHistoryWindowTests {
         all.performClick(nil)
         #expect(table.numberOfRows == 30)
         table.selectRowIndexes(IndexSet(integer: 20), byExtendingSelection: false)
-        controller.update(entries: ["New"] + entries, storageFailed: true)
+        controller.update(entries: [.text("New")] + entries.map(ClipboardEntry.text), storageFailed: true)
         let add = try #require(views.compactMap { $0 as? NSButton }.first {
             $0.action == NSSelectorFromString("addSelectedToTasks")
         })

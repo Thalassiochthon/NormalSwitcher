@@ -4,6 +4,8 @@ import Carbon
 /// Окно настроек с вкладками
 @MainActor
 final class SettingsWindowController {
+    private weak var imageLimitStepper: NSStepper?
+    private weak var imageLimitValue: NSTextField?
     private var window: NSWindow?
     private var autoConvertCheckbox: NSButton?      // #4: синк тумблера меню → окно настроек
     private var hotkeyPopups: [HotkeySlot: NSPopUpButton] = [:]
@@ -429,6 +431,22 @@ final class SettingsWindowController {
                                 #selector(clipboardHistoryPersistenceChanged(_:)))
         persistence.isEnabled = enabled
         clipboardHistoryPersistenceCheckbox = persistence
+        let imageLimitTitle = taskText("Images to keep", "Сколько изображений хранить")
+        let value = NSTextField(labelWithString: String(settings.clipboardImageLimit))
+        value.alignment = .right
+        value.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        imageLimitValue = value
+        let stepper = NSStepper()
+        stepper.minValue = 0
+        stepper.maxValue = Double(ClipboardHistoryStore.maxImageLimit)
+        stepper.increment = 1
+        stepper.integerValue = settings.clipboardImageLimit
+        stepper.valueWraps = false
+        stepper.isEnabled = enabled
+        stepper.target = self
+        stepper.action = #selector(clipboardImageLimitChanged(_:))
+        stepper.setAccessibilityLabel(imageLimitTitle)
+        imageLimitStepper = stepper
         taskShortcutButtons.removeAll()
         let taskRows = TaskShortcut.allCases.map { action in
             let shortcutButton = button(taskShortcutTitle(action), #selector(recordTaskShortcut(_:)))
@@ -444,6 +462,9 @@ final class SettingsWindowController {
         return scrollable([
             check(L10n.clipboardHistoryEnabled, enabled, #selector(clipboardHistoryChanged(_:))),
             hint(String(format: L10n.settingsClipboardHistoryLimit, ClipboardHistory.limit)),
+            row(NSTextField(labelWithString: imageLimitTitle), row(value, stepper)),
+            hint(taskText("0 turns off images. Up to 64 MiB of images in total.",
+                          "0 отключает изображения. На все изображения отводится до 64 МиБ.")),
             row(NSTextField(wrappingLabelWithString: L10n.settingsOpenClipboardHistory), shortcut),
             NSBox.separator(), persistence, hint(taskText(
                 "History is encrypted on this Mac. Its key is kept in Keychain. Turning this off removes saved history; tasks stay saved.",
@@ -521,8 +542,15 @@ final class SettingsWindowController {
     @objc private func clipboardHistoryChanged(_ sender: NSButton) {
         let enabled = sender.state == .on
         SettingsManager.shared.clipboardHistoryEnabled = enabled
+        imageLimitStepper?.isEnabled = enabled
         clipboardHistoryPersistenceCheckbox?.isEnabled = enabled
         clipboardHistoryShortcutButton?.isEnabled = enabled
+        onClipboardHistoryChanged?()
+    }
+
+    @objc private func clipboardImageLimitChanged(_ sender: NSStepper) {
+        SettingsManager.shared.clipboardImageLimit = sender.integerValue
+        imageLimitValue?.stringValue = String(sender.integerValue)
         onClipboardHistoryChanged?()
     }
 

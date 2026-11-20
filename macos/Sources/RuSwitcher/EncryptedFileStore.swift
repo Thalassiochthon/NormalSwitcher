@@ -28,22 +28,20 @@ final class EncryptedFileStore<Value: Codable> {
 
     /// Migration holds the same lock as ordinary writes. The source is removed
     /// only after the new ciphertext has been read back and authenticated.
-    func load(migrating legacy: URL, merge: (Value?, Value) -> Value) throws -> Value? {
+    func loadLocked(migrating legacy: URL, merge: (Value?, Value) -> Value) throws -> Value? {
         do {
-            return try withLock {
-                let current = try load()
-                guard let original = try readIfPresent(legacy) else { return current }
-                let old = try JSONDecoder().decode(Value.self, from: original)
-                let merged = merge(current, old)
-                try saveLocked(merged)
-                let written = try Data(contentsOf: file)
-                _ = try decode(written)
-                guard written == snapshot, try readIfPresent(legacy) == original else {
-                    throw EncryptedStoreError.changedOnDisk
-                }
-                try FileManager.default.removeItem(at: legacy)
-                return merged
+            let current = try load()
+            guard let original = try readIfPresent(legacy) else { return current }
+            let old = try JSONDecoder().decode(Value.self, from: original)
+            let merged = merge(current, old)
+            try saveLocked(merged)
+            let written = try Data(contentsOf: file)
+            _ = try decode(written)
+            guard written == snapshot, try readIfPresent(legacy) == original else {
+                throw EncryptedStoreError.changedOnDisk
             }
+            try FileManager.default.removeItem(at: legacy)
+            return merged
         } catch {
             loaded = false
             throw error
@@ -56,20 +54,22 @@ final class EncryptedFileStore<Value: Codable> {
 
     /// Explicitly clearing/disabling clipboard persistence also works when its
     /// key is unavailable. Tasks never use this operation.
-    func remove(including legacy: URL) throws {
+    func remove(including legacy: URL, cleanup: () throws -> Void = {}) throws {
         try withLock {
             // Legacy first: on failure keep the authoritative encrypted copy.
             try removeIfPresent(legacy)
             try removeIfPresent(file)
+            try cleanup()
             snapshot = nil
             loaded = true
         }
     }
 
-    private func saveLocked(_ value: Value) throws {
+    func saveLocked(_ value: Value, prepare: () throws -> Void = {}) throws {
         guard loaded else { throw EncryptedStoreError.notLoaded }
         let current = try readIfPresent(file)
         guard current == snapshot else { throw EncryptedStoreError.changedOnDisk }
+        try prepare()
         let sealed = try AES.GCM.seal(JSONEncoder().encode(value), using: key(current == nil))
         guard let data = sealed.combined else { throw CocoaError(.fileWriteUnknown) }
         let temporary = file.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".tmp")
@@ -97,7 +97,7 @@ final class EncryptedFileStore<Value: Codable> {
         catch let error as CocoaError where error.code == .fileNoSuchFile { }
     }
 
-    private func withLock<T>(_ body: () throws -> T) throws -> T {
+    func withLock<T>(_ body: () throws -> T) throws -> T {
         let directory = file.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])

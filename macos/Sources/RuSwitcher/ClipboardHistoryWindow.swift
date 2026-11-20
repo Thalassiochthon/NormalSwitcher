@@ -2,10 +2,10 @@ import AppKit
 
 @MainActor
 final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
-    private var entries: [String]
+    private var entries: [ClipboardEntry]
     private let onAddTask: ((String) -> Void)?
-    private let onPaste: (String) -> Void
-    private var results: [String]
+    private let onPaste: (ClipboardEntry) -> Void
+    private var results: [ClipboardEntry]
     private let search = NSSearchField()
     private let table = NSTableView()
     private let emptyLabel = NSTextField(labelWithString: L10n.clipboardHistoryNoMatches)
@@ -19,9 +19,9 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
 
     private let taskButton = NSButton(title: taskText("Add to Tasks", "В задачи"), target: nil, action: nil)
 
-    init(entries: [String], storageFailed: Bool, emptyMessage: String,
+    init(entries: [ClipboardEntry], storageFailed: Bool, emptyMessage: String,
          onAddTask: ((String) -> Void)?, onRetry: @escaping () -> Void,
-         onClear: @escaping () -> Void, onPaste: @escaping (String) -> Void) {
+         onClear: @escaping () -> Void, onPaste: @escaping (ClipboardEntry) -> Void) {
         self.entries = entries
         self.results = entries
         self.onPaste = onPaste
@@ -127,7 +127,7 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
 
     required init?(coder: NSCoder) { nil }
 
-    func update(entries: [String], storageFailed: Bool) {
+    func update(entries: [ClipboardEntry], storageFailed: Bool) {
         self.entries = entries
         storageWarning.isHidden = !storageFailed
         filterChanged()
@@ -151,10 +151,31 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard results.indices.contains(row) else { return nil }
-        let label = NSTextField(labelWithString: ClipboardHistory.preview(results[row], limit: 120))
+        let entry = results[row]
+        if case .image(let image) = entry {
+            let preview = NSImageView()
+            preview.image = NSImage(data: image.thumbnail)
+            preview.imageScaling = .scaleProportionallyUpOrDown
+            preview.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            preview.widthAnchor.constraint(equalToConstant: 76).isActive = true
+            let label = NSTextField(labelWithString: Self.imageLabel(image))
+            let stack = NSStackView(views: [preview, label])
+            stack.orientation = .horizontal
+            return stack
+        }
+        let label = NSTextField(labelWithString: ClipboardHistory.preview(entry.text ?? "", limit: 120))
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 1
         return label
+    }
+
+    private static func imageLabel(_ image: ClipboardImage) -> String {
+        taskText("Image", "Изображение") + " · " + String(image.width) + " × " + String(image.height)
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard results.indices.contains(row), case .image = results[row] else { return 25 }
+        return 50
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -181,7 +202,12 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
         let query = search.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let selected = results.indices.contains(table.selectedRow) ? results[table.selectedRow] : nil
         results = query.isEmpty ? (allButton.state == .on ? entries : Array(entries.prefix(8))) :
-            entries.filter { $0.localizedStandardContains(query) }
+            entries.filter {
+                switch $0 {
+                case .text(let text): return text.localizedStandardContains(query)
+                case .image(let image): return Self.imageLabel(image).localizedStandardContains(query)
+                }
+            }
         countLabel.stringValue = taskText("Showing \(results.count) of \(entries.count)",
                                           "Показано \(results.count) из \(entries.count)")
         allButton.isHidden = entries.count <= 8
@@ -199,12 +225,12 @@ final class ClipboardHistoryWindow: NSWindowController, NSTableViewDataSource, N
     private func updateActions() {
         let row = table.selectedRow
         pasteButton.isEnabled = results.indices.contains(row)
-        taskButton.isEnabled = pasteButton.isEnabled && !results[row].allSatisfy(\.isWhitespace)
+        taskButton.isEnabled = pasteButton.isEnabled && results[row].text?.allSatisfy(\.isWhitespace) == false
     }
 
     @objc private func addSelectedToTasks() {
         let row = table.selectedRow
-        if results.indices.contains(row) { onAddTask?(results[row]) }
+        if results.indices.contains(row), let text = results[row].text { onAddTask?(text) }
     }
 
     @objc private func pasteDoubleClick() {
