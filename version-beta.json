@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0i",
-  "build": "85",
+  "version": "1.2.0k",
+  "build": "87",
   "dev": "",
-  "notes": "Исправлено сохранение новой задачи с первого нажатия.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0i",
-  "sha256": "03b0f1289143aa93dcdc369d1ab63cc62fa04e77867491f1bb254d627b5d2314",
-  "source_commit": "aef33f828f7ade18d96829fb972833c2d1ac54b9"
+  "notes": "В истории буфера macOS появились скриншоты и скопированные изображения. В настройках можно хранить от 0 до 50 изображений. По умолчанию сохраняются 10, общий лимит — 64 МиБ. Выбранное изображение вставляется в исходном разрешении. Включает исправление поиска поля ввода из 1.2.0j.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0k",
+  "sha256": "092c94668695bcad19b2eca58bedacbd64fb7c95c91b08cda6bef725a6f6c702",
+  "source_commit": "0a7ac2ed546527133b83682c7b7806aba5f7aeb9"
 }
