@@ -50,6 +50,39 @@ struct OrderedEditorTextTests {
         }
     }
 
+    @Test func delayedLastCharacterCanSettleBeforeTheSpace() throws {
+        var text = "ghbdt"
+        let range = try TextConverter.readSettledSuffix {
+            TextConverter.verifyEditorSuffix(original: "ghbdtn", caret: CFRange(location: text.utf16.count, length: 0)) {
+                TextConverter.textInRange(text, range: $0)
+            }
+        } beforeRetry: {
+            text.append("n")
+            return nil
+        }.get()
+        #expect(range.location == 0 && range.length == 6)
+    }
+
+    @Test func stableMismatchAndContextChangeAbortTheEdit() {
+        var reads = 0
+        func mismatch() -> Result<CFRange, TextConverter.AutomaticEditFailure> {
+            reads += 1
+            return .failure(.textChanged)
+        }
+        let mismatchResult = TextConverter.readSettledSuffix(read: mismatch, beforeRetry: { nil })
+        guard case .failure(.textChanged) = mismatchResult else {
+            Issue.record("A persistent mismatch must skip the replacement")
+            return
+        }
+        #expect(reads == 2)
+        let changed = TextConverter.readSettledSuffix(read: mismatch, beforeRetry: { .contextChanged })
+        guard case .failure(.contextChanged) = changed else {
+            Issue.record("A focus or layout change during the wait must abort the retry")
+            return
+        }
+        #expect(reads == 3)
+    }
+
     @Test func suffixCannotStartInTheMiddleOfAGrapheme() {
         #expect(TextConverter.textInRange("🙂vbh", range: CFRange(location: 1, length: 4)) == nil)
         #expect(TextConverter.textInRange("e\u{0301}vbh", range: CFRange(location: 1, length: 4)) == nil)

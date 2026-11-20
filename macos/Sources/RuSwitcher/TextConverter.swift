@@ -220,6 +220,7 @@ final class TextConverter {
         }
         preparedFocus = target
         let focus = target.element
+        AXUIElementSetMessagingTimeout(focus, 0.006)
         guard hasTime(0.006) else { return .deadline }
         if axAttribute(focus, kAXSubroleAttribute as CFString) as? String == (kAXSecureTextFieldSubrole as String) {
             return .protectedField
@@ -259,21 +260,18 @@ final class TextConverter {
                                     readSuffix: readSuffix)
         }
 
-        let initial = verifiedRange(caret: readCaret())
+        let initial = Self.readSettledSuffix(read: { verifiedRange(caret: readCaret()) }, beforeRetry: {
+            guard hasTime(0.033) else { return .deadline }
+            // Give the editor a chance to process the preceding key, while this callback
+            // still owns the delimiter. A persistent mismatch must never authorize deletion.
+            Thread.sleep(forTimeInterval: 0.008)
+            guard hasTime(0.020) else { return .deadline }
+            return sameInput() ? nil : .contextChanged
+        })
         let range: CFRange
         switch initial {
-        case .success(let verified):
-            range = verified
-        case .failure(.textChanged), .failure(.caretUnavailable):
-            // A preceding keystroke may still be reaching the editor. Retry within this
-            // callback so a late result can never run after the original delimiter.
-            guard hasTime(0.025) else { return .deadline }
-            switch verifiedRange(caret: readCaret()) {
-            case .success(let verified): range = verified
-            case .failure(let failure): return failure
-            }
-        case .failure(let failure):
-            return failure
+        case .success(let verified): range = verified
+        case .failure(let failure): return failure
         }
 
         let normalized = Self.normalizedForInsert(insert)
@@ -301,6 +299,19 @@ final class TextConverter {
         }
         events.forEach(post)
         return nil
+    }
+
+    nonisolated static func readSettledSuffix(
+        read: () -> Result<CFRange, AutomaticEditFailure>, beforeRetry: () -> AutomaticEditFailure?
+    ) -> Result<CFRange, AutomaticEditFailure> {
+        let initial = read()
+        switch initial {
+        case .failure(.textChanged), .failure(.caretUnavailable):
+            if let failure = beforeRetry() { return .failure(failure) }
+            return read()
+        default:
+            return initial
+        }
     }
 
     nonisolated static func verifyEditorSuffix(
@@ -478,17 +489,20 @@ final class TextConverter {
             || now - (lastAccessibilityRequest?.time ?? 0) > 10
         preparingFocus = true
         accessibilityQueue.async { [weak self] in
-            let deadline = ProcessInfo.processInfo.systemUptime + 0.075
-            var focus = Self.findOrderedFocus(pid: pid, deadline: deadline, searchWindow: true)
+            // Chromium may initialize its accessibility tree when the application role is read.
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 0.025)
+            var role: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(app, kAXRoleAttribute as CFString, &role)
+            var focus = Self.findOrderedFocus(pid: pid, deadline: ProcessInfo.processInfo.systemUptime + 0.15,
+                                              searchWindow: true, timeout: 0.025)
             let requestedAccessibility = focus == nil && canRequestAccessibility
             if requestedAccessibility {
-                let app = AXUIElementCreateApplication(pid)
-                AXUIElementSetMessagingTimeout(app, 0.02)
                 let result = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
                 rslog("editor-focus: pid=\(pid) accessibility-request=\(result.rawValue)")
                 if result == .success {
-                    focus = Self.findOrderedFocus(pid: pid, deadline: ProcessInfo.processInfo.systemUptime + 0.075,
-                                                  searchWindow: true)
+                    focus = Self.findOrderedFocus(pid: pid, deadline: ProcessInfo.processInfo.systemUptime + 0.15,
+                                                  searchWindow: true, timeout: 0.025)
                 }
             }
             Task { @MainActor [focus] in
@@ -507,7 +521,12 @@ final class TextConverter {
         if let cached = preparedFocus, cached.pid == pid,
            orderedFocusMatches(cached, pid: pid, deadline: deadline, allowDirectLookup: false) { return cached }
         prepareEditorContext(pid: pid)
-        return nil
+        // The first word after focusing a window can beat the background search.
+        // Leave time for both suffix reads and the final focus check before the delimiter.
+        let now = ProcessInfo.processInfo.systemUptime
+        let searchDeadline = min(now + 0.030, deadline - 0.035)
+        guard now + 0.006 < searchDeadline else { return nil }
+        return Self.findOrderedFocus(pid: pid, deadline: searchDeadline, searchWindow: true)
     }
 
     private func orderedFocusMatches(_ target: OrderedFocus, pid: pid_t, deadline: TimeInterval,
@@ -537,10 +556,15 @@ final class TextConverter {
     ]
 
     private nonisolated static func findOrderedFocus(pid: pid_t, deadline: TimeInterval,
-                                                     searchWindow: Bool) -> OrderedFocus? {
+                                                     searchWindow: Bool, timeout: Float = 0.006) -> OrderedFocus? {
+        func setTimeout(_ element: AXUIElement) -> Bool {
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0.001 else { return false }
+            AXUIElementSetMessagingTimeout(element, min(timeout, Float(remaining)))
+            return true
+        }
         func attribute(_ element: AXUIElement, _ key: String) -> AnyObject? {
-            guard ProcessInfo.processInfo.systemUptime + 0.006 < deadline else { return nil }
-            AXUIElementSetMessagingTimeout(element, 0.006)
+            guard setTimeout(element) else { return nil }
             var raw: AnyObject?
             guard AXUIElementCopyAttributeValue(element, key as CFString, &raw) == .success else { return nil }
             return raw
@@ -572,10 +596,17 @@ final class TextConverter {
         if let focused = appFocus, editor(focused, requireFocused: false) {
             return OrderedFocus(pid: pid, element: focused, window: window)
         }
-        if AXIsProcessTrusted(),
-           let focused = element(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute),
-           editor(focused, requireFocused: false) {
-            return OrderedFocus(pid: pid, element: focused, window: window)
+        if AXIsProcessTrusted(), ProcessInfo.processInfo.systemUptime + 0.006 < deadline {
+            let system = AXUIElementCreateSystemWide()
+            AXUIElementSetMessagingTimeout(system, 0.006)
+            var raw: CFTypeRef?
+            if AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &raw) == .success,
+               let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() {
+                let focused = raw as! AXUIElement
+                if editor(focused, requireFocused: false) {
+                    return OrderedFocus(pid: pid, element: focused, window: window)
+                }
+            }
         }
         guard let window else { return nil }
         let windowFocus = element(window, kAXFocusedUIElementAttribute)
@@ -591,7 +622,13 @@ final class TextConverter {
             }
         }
         guard searchWindow else { return nil }
-        var nodes = containers + [window]
+        // Both focus attributes can refer to the same container or to the window itself.
+        // Count distinct elements so repeated branches cannot crowd out the editor.
+        var nodes: [AXUIElement] = []
+        func enqueue(_ node: AXUIElement) {
+            if nodes.count < 48, !nodes.contains(where: { CFEqual($0, node) }) { nodes.append(node) }
+        }
+        for node in containers + [window] { enqueue(node) }
         var index = 0
         while index < nodes.count, ProcessInfo.processInfo.systemUptime + 0.006 < deadline {
             let node = nodes[index]
@@ -600,12 +637,11 @@ final class TextConverter {
                 return OrderedFocus(pid: pid, element: node, window: window)
             }
             let remaining = 48 - nodes.count
-            if remaining > 0, ProcessInfo.processInfo.systemUptime + 0.006 < deadline {
+            if remaining > 0, setTimeout(node) {
                 var children: CFArray?
-                AXUIElementSetMessagingTimeout(node, 0.006)
-                if AXUIElementCopyAttributeValues(node, kAXChildrenAttribute as CFString, 0, remaining, &children) == .success,
+                if AXUIElementCopyAttributeValues(node, kAXChildrenAttribute as CFString, 0, 48, &children) == .success,
                    let elements = children as? [AXUIElement] {
-                    nodes.append(contentsOf: elements)
+                    for child in elements { enqueue(child) }
                 }
             }
         }
