@@ -11,15 +11,12 @@ import CoreGraphics
 final class CaretIndicator {
     private let panel: NSPanel
     private let label: NSTextField
-    private var lastFlag = ""
+
     private var hideTimer: Timer?
     private var visible = false
 
-    /// Поставщик флага текущей раскладки — обычно AppDelegate.flagForCurrentLayout.
-    var flagProvider: () -> String = { "" }
-
     /// Сколько держим флаг после переключения, прежде чем спрятать сам (если не печатают).
-    private let showDuration: TimeInterval = 1.6
+    private let showDuration: TimeInterval = 1.0
 
     init() {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 30, height: 24),
@@ -39,14 +36,17 @@ final class CaretIndicator {
         panel.isExcludedFromWindowsMenu = true
 
         // Полупрозрачная скруглённая подложка — читаемость флага на любом фоне.
-        let backdrop = NSView(frame: NSRect(x: 0, y: 0, width: 30, height: 24))
+        let backdrop = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 30, height: 24))
         backdrop.wantsLayer = true
-        backdrop.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
+        backdrop.material = .popover
+        backdrop.state = .active
+        backdrop.blendingMode = .behindWindow
+        backdrop.layer?.masksToBounds = true
         backdrop.layer?.cornerRadius = 5
         panel.contentView = backdrop
 
         label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 14)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
         label.alignment = .center
         label.isBezeled = false
         label.isEditable = false
@@ -55,6 +55,7 @@ final class CaretIndicator {
         backdrop.addSubview(label)
         NSLayoutConstraint.activate([
             label.centerXAnchor.constraint(equalTo: backdrop.centerXAnchor),
+            label.widthAnchor.constraint(lessThanOrEqualTo: backdrop.widthAnchor, constant: -8),
             label.centerYAnchor.constraint(equalTo: backdrop.centerYAnchor),
         ])
     }
@@ -75,17 +76,23 @@ final class CaretIndicator {
         hideTimer?.invalidate(); hideTimer = nil
         panel.orderOut(nil)
         visible = false
-        lastFlag = ""
+
     }
 
     // MARK: - Internals
 
     private func showAtCaret() {
-        guard let rect = axCaretRectAppKit() else { hide(); return }   // нет каретки → не показываем
-        let flag = flagProvider()
-        guard !flag.isEmpty else { hide(); return }
-        if flag != lastFlag { label.stringValue = flag; lastFlag = flag }
-        position(forCaret: rect)
+        guard let (rect, rtl) = axCaretRectAppKit(),
+              let name = Self.badgeLabel(LayoutSwitcher.currentLanguageCode()) ?? LayoutSwitcher.currentInputSourceName() else {
+            hide()
+            return
+        }
+        label.stringValue = name
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        let width = min(152, max(28, ceil(label.intrinsicContentSize.width) + 12))
+        panel.setContentSize(NSSize(width: width, height: 19))
+        guard position(forCaret: rect, rtl: rtl) else { hide(); return }
         if !panel.isVisible { panel.orderFrontRegardless() }            // показ БЕЗ кражи фокуса
         fade(to: 1, duration: 0.12)
         visible = true
@@ -110,24 +117,36 @@ final class CaretIndicator {
         }
     }
 
-    /// Кладём флаг справа от каретки (по центру по вертикали), прижимая к видимой области экрана.
-    private func position(forCaret caret: NSRect) {
-        let gap: CGFloat = 6
-        let size = panel.frame.size
-        var x = caret.maxX + gap
-        var y = caret.midY - size.height / 2
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: caret.midX, y: caret.midY)) })
-            ?? NSScreen.main ?? NSScreen.screens.first
-        if let vf = screen?.visibleFrame {
-            if x + size.width > vf.maxX { x = caret.minX - gap - size.width }  // не влез справа → слева
-            x = min(max(x, vf.minX), vf.maxX - size.width)
-            y = min(max(y, vf.minY), vf.maxY - size.height)
+    static func badgeLabel(_ language: String?) -> String? {
+        guard let code = language?.split(whereSeparator: { $0 == "-" || $0 == "_" }).first,
+              !code.isEmpty, code != "und" else { return nil }
+        return code == "iw" ? "HE" : code.uppercased()
+    }
+
+    static func origin(for caret: CGRect, size: CGSize, visible: CGRect, rtl: Bool) -> CGPoint? {
+        guard isInsertionRect(caret), visible.contains(CGPoint(x: caret.midX, y: caret.midY)),
+              size.height <= visible.height else { return nil }
+        let right = caret.maxX + 4
+        let left = caret.minX - size.width - 4
+        for x in rtl ? [left, right] : [right, left] where x >= visible.minX && x + size.width <= visible.maxX {
+            let y = min(max(caret.midY - size.height / 2, visible.minY), visible.maxY - size.height)
+            return CGPoint(x: x.rounded(), y: y.rounded())
         }
-        panel.setFrameOrigin(NSPoint(x: x.rounded(), y: y.rounded()))
+        return nil
+    }
+
+    private func position(forCaret caret: NSRect, rtl: Bool) -> Bool {
+        for screen in NSScreen.screens {
+            if let point = Self.origin(for: caret, size: panel.frame.size, visible: screen.visibleFrame, rtl: rtl) {
+                panel.setFrameOrigin(point)
+                return true
+            }
+        }
+        return false
     }
 
     /// Каретка в координатах AppKit (низ-лево), или nil если недоступна / гвард не пустил.
-    private func axCaretRectAppKit() -> NSRect? {
+    private func axCaretRectAppKit() -> (NSRect, Bool)? {
         guard SettingsManager.shared.caretFlag else { return nil }
         guard AXIsProcessTrusted() else { return nil }
         guard !AutoSwitchPolicy.secureInputActive else { return nil }          // не над полем пароля
@@ -149,42 +168,60 @@ final class CaretIndicator {
               let focused = focusedRaw else { return nil }
         let element = focused as! AXUIElement
         // Нативные Cocoa → range-путь; веб/Electron → text-marker (приватные AX-атрибуты).
-        guard let topLeft = axCaretRectTopLeft(of: element) ?? axCaretRectViaTextMarker(of: element) else { return nil }
+        let index = insertionIndex(of: element)
+        guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else { return nil }
+        var rtl = false
+        if let index {
+            // Compare insertion positions on this line; no text content is needed.
+            if index < Int.max, let next = insertionBounds(of: element, at: index + 1),
+               abs(topLeft.midY - next.midY) < 1, next.midX != topLeft.midX {
+                rtl = next.midX < topLeft.midX
+            } else if index > 0, let previous = insertionBounds(of: element, at: index - 1),
+                      abs(topLeft.midY - previous.midY) < 1 {
+                rtl = previous.midX > topLeft.midX
+            }
+        }
 
         // AX отдаёт глобальные координаты с началом сверху-слева ОСНОВНОГО экрана; AppKit — снизу-слева.
         // Отражаем по полной высоте основного экрана (screens.first), не по visibleFrame, не по целевому.
         guard let primary = NSScreen.screens.first else { return nil }
         var r = topLeft
         r.origin.y = primary.frame.height - topLeft.origin.y - topLeft.height
-        return r
+        return (r, rtl)
     }
 
-    private func axCaretRectTopLeft(of element: AXUIElement) -> CGRect? {
+    private func insertionIndex(of element: AXUIElement) -> Int? {
         var rangeValue: AnyObject?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
               let rv = rangeValue, CFGetTypeID(rv) == AXValueGetTypeID() else { return nil }
         var range = CFRange(location: 0, length: 0)
         guard AXValueGetValue(rv as! AXValue, .cfRange, &range) else { return nil }
 
-        // Часть Cocoa-контролов отдаёт пустой прямоугольник на нулевой длине → просим 1 символ,
-        // с откатом на исходный нулевой диапазон (пустое поле, где следующего глифа нет).
-        var q = range; q.length = 1
-        guard let arg = AXValueCreate(.cfRange, &q) else { return nil }
+        return range.location >= 0 && range.length == 0 ? range.location : nil
+    }
+
+    private func insertionBounds(of element: AXUIElement, at index: Int) -> CGRect? {
+        var range = CFRange(location: index, length: 0)
+        guard let arg = AXValueCreate(.cfRange, &range) else { return nil }
         var boundsValue: AnyObject?
-        var err = AXUIElementCopyParameterizedAttributeValue(
-            element, kAXBoundsForRangeParameterizedAttribute as CFString, arg, &boundsValue)
-        if err != .success {
-            guard let zeroArg = AXValueCreate(.cfRange, &range) else { return nil }
-            err = AXUIElementCopyParameterizedAttributeValue(
-                element, kAXBoundsForRangeParameterizedAttribute as CFString, zeroArg, &boundsValue)
-        }
-        guard err == .success, let bv = boundsValue, CFGetTypeID(bv) == AXValueGetTypeID() else { return nil }
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element, kAXBoundsForRangeParameterizedAttribute as CFString, arg, &boundsValue
+        ) == .success else { return nil }
+        return Self.caretBounds(boundsValue)
+    }
+
+    private static func caretBounds(_ value: AnyObject?) -> CGRect? {
+        guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var rect = CGRect.zero
-        guard AXValueGetValue(bv as! AXValue, .cgRect, &rect) else { return nil }
-        // Каретка: width = 0 (тонкая черта), но height = высота строки. VS Code-canvas отдаёт
-        // (0,N,0x0) — height 0 = реальной геометрии нет, не показываем (иначе плашка в углу экрана).
-        guard rect.height >= 1, rect.width.isFinite, rect.height.isFinite else { return nil }
+        guard AXValueGetValue(value as! AXValue, .cgRect, &rect),
+              isInsertionRect(rect) else { return nil }
         return rect
+    }
+
+    static func isInsertionRect(_ rect: CGRect) -> Bool {
+        // AX uses screen points. A normal insertion caret is zero or a few points wide.
+        rect.origin.x.isFinite && rect.origin.y.isFinite &&
+            rect.size.height.isFinite && rect.size.height >= 1 && (0...4).contains(rect.size.width)
     }
 
     /// Electron/Chromium строят дерево a11y лениво — поднимаем его приватным атрибутом
@@ -203,13 +240,7 @@ final class CaretIndicator {
               let mr = markerRange else { return nil }
         var boundsValue: AnyObject?
         guard AXUIElementCopyParameterizedAttributeValue(
-                element, "AXBoundsForTextMarkerRange" as CFString, mr as CFTypeRef, &boundsValue) == .success,
-              let bv = boundsValue, CFGetTypeID(bv) == AXValueGetTypeID() else { return nil }
-        var rect = CGRect.zero
-        guard AXValueGetValue(bv as! AXValue, .cgRect, &rect) else { return nil }
-        // Тот же гвард, что в range-пути: отвергаем вырожденную геометрию (веб/Electron
-        // порой отдаёт (x,y,0x0) с ненулевым origin — height>=1 это ловит, включая .zero).
-        guard rect.height >= 1, rect.width.isFinite, rect.height.isFinite else { return nil }
-        return rect   // экранные координаты, верх-лево
+                element, "AXBoundsForTextMarkerRange" as CFString, mr as CFTypeRef, &boundsValue) == .success else { return nil }
+        return Self.caretBounds(boundsValue)
     }
 }

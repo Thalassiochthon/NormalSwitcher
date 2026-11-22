@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var caretIndicator: CaretIndicator?   // issue #10: флаг у каретки (бета, по умолчанию OFF)
     private var startedAsLoginItem = false
     private let secureNotice = SecureInputNotice()  // issue #27: подсказка о защ. вводе без кражи фокуса
-    private var lastFlagShown: String?            // идентичность раскладки для детекта смены (не title!)
+    private var lastSourceID: String?            // идентичность раскладки для детекта смены (не title!)
     private var badgeCache: [String: NSImage] = [:]  // монохромные плашки, чтобы не перерисовывать 2с-опросом
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1185,9 +1185,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let flag = flagForCurrentLayout()
         // Каретку дёргаем ТОЛЬКО при реальной смене раскладки: updateStatusIcon зовётся ещё и
         // 2-секундным опросом-страховкой, иначе флаг у каретки выскакивал бы каждые 2с.
-        // Сравниваем по флагу-идентичности, а не по title — в монохромном режиме title пуст.
-        let changed = lastFlagShown != flag
-        lastFlagShown = flag
+        // Сравниваем по идентификатору раскладки, а не по title — в монохромном режиме title пуст.
+        let sourceID = LayoutSwitcher.currentLayoutID()
+        let changed = lastSourceID != sourceID
+        lastSourceID = sourceID
         let settings = SettingsManager.shared
         statusItem.button?.title = ""
         statusItem.button?.image = (settings.monochromeIcon ? nil : flatFlag(for: flag, height: 12))
@@ -1332,9 +1333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keyboardMonitor.caretFlagEnabled = SettingsManager.shared.caretFlag   // гейт диспатча onUserInput
         if SettingsManager.shared.caretFlag, monitoringActive {
             if caretIndicator == nil {
-                let ci = CaretIndicator()
-                ci.flagProvider = { [weak self] in self?.flagForCurrentLayout() ?? "" }
-                caretIndicator = ci
+                caretIndicator = CaretIndicator()
             }
         } else {
             caretIndicator?.teardown()
