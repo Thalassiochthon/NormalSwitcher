@@ -2,11 +2,8 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-/// issue #10: показывает флаг текущей раскладки рядом с текстовой кареткой — кратко после
-/// переключения, прячется при печати/клике. Позицию каретки берём через Accessibility
-/// (kAXBoundsForRangeParameterizedAttribute). Если приложение её не отдаёт (Electron/веб,
-/// часть терминалов) — просто не показываем; флаг в меню-баре остаётся. Click-through,
-/// не крадёт фокус (LSUIElement + .nonactivatingPanel + orderFrontRegardless).
+/// Briefly shows the current input source beside the text caret, or beside the pointer
+/// when the frontmost app does not expose a usable caret. The panel never takes focus.
 @MainActor
 final class CaretIndicator {
     private let panel: NSPanel
@@ -15,7 +12,7 @@ final class CaretIndicator {
     private var hideTimer: Timer?
     private var visible = false
 
-    /// Сколько держим флаг после переключения, прежде чем спрятать сам (если не печатают).
+    /// Сколько держим плашку после переключения, прежде чем спрятать сам (если не печатают).
     private let showDuration: TimeInterval = 1.0
 
     init() {
@@ -62,7 +59,7 @@ final class CaretIndicator {
 
     // MARK: - Entry points (вызываются из AppDelegate)
 
-    /// Реальная смена раскладки → показать флаг у каретки (на showDuration).
+    /// Реальная смена раскладки → показать код раскладки (на showDuration).
     func layoutChanged() {
         guard SettingsManager.shared.caretFlag else { return }
         showAtCaret()
@@ -76,13 +73,14 @@ final class CaretIndicator {
         hideTimer?.invalidate(); hideTimer = nil
         panel.orderOut(nil)
         visible = false
-
     }
 
     // MARK: - Internals
 
     private func showAtCaret() {
-        guard let (rect, rtl) = axCaretRectAppKit(),
+        guard !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
+              let app = NSWorkspace.shared.frontmostApplication,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier,
               let name = Self.badgeLabel(LayoutSwitcher.currentLanguageCode()) ?? LayoutSwitcher.currentInputSourceName() else {
             hide()
             return
@@ -92,7 +90,15 @@ final class CaretIndicator {
         label.maximumNumberOfLines = 1
         let width = min(152, max(28, ceil(label.intrinsicContentSize.width) + 12))
         panel.setContentSize(NSSize(width: width, height: 19))
-        guard position(forCaret: rect, rtl: rtl) else { hide(); return }
+        if let (rect, rtl) = axCaretRectAppKit(pid: app.processIdentifier),
+           position(forCaret: rect, rtl: rtl) {
+            rslog("layout-indicator: caret")
+        } else if positionBesidePointer(NSEvent.mouseLocation) {
+            rslog("layout-indicator: pointer")
+        } else {
+            hide()
+            return
+        }
         if !panel.isVisible { panel.orderFrontRegardless() }            // показ БЕЗ кражи фокуса
         fade(to: 1, duration: 0.12)
         visible = true
@@ -145,28 +151,30 @@ final class CaretIndicator {
         return false
     }
 
-    /// Каретка в координатах AppKit (низ-лево), или nil если недоступна / гвард не пустил.
-    private func axCaretRectAppKit() -> (NSRect, Bool)? {
-        guard SettingsManager.shared.caretFlag else { return nil }
-        guard AXIsProcessTrusted() else { return nil }
-        guard !AutoSwitchPolicy.secureInputActive else { return nil }          // не над полем пароля
-        let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        // denylist авто-конверсии НЕ применяем: он про «не менять текст», а флаг ничего не меняет —
-        // в IDE/терминалах индикатор раскладки как раз полезен. Пароли закрыты secure-input выше.
-        guard !AutoSwitchPolicy.shouldDeferToRemoteClient else { return nil }  // удалёнка: каретка на той стороне
-        guard frontID != Bundle.main.bundleIdentifier else { return nil }      // не над своим окном
+    static func pointerOrigin(for pointer: CGPoint, size: CGSize, visible: CGRect) -> CGPoint? {
+        guard size.width <= visible.width, size.height <= visible.height else { return nil }
+        let gap: CGFloat = 13
+        let right = pointer.x + gap
+        let x = right + size.width <= visible.maxX ? right : pointer.x - size.width - gap
+        let y = pointer.y - size.height - 5
+        return CGPoint(x: min(max(x, visible.minX), visible.maxX - size.width),
+                       y: min(max(y, visible.minY), visible.maxY - size.height))
+    }
 
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        // Ограничиваем AX round-trip: с зависшим/занятым таргетом (или Chromium, чьё дерево
-        // только строится после AXManualAccessibility) дефолтный таймаут ~6с завесил бы главный
-        // поток. 0.25с — не успел, значит nil → hide(), без залипания UI на смене раскладки.
-        AXUIElementSetMessagingTimeout(axApp, 0.25)
-        enableChromiumA11y(axApp)   // поднять ленивое дерево Electron/Chromium (идемпотентно)
-        var focusedRaw: AnyObject?
-        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focusedRaw) == .success,
-              let focused = focusedRaw else { return nil }
-        let element = focused as! AXUIElement
+    private func positionBesidePointer(_ pointer: CGPoint) -> Bool {
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }),
+              let point = Self.pointerOrigin(for: pointer, size: panel.frame.size, visible: screen.visibleFrame) else {
+            return false
+        }
+        panel.setFrameOrigin(point)
+        return true
+    }
+
+    private func axCaretRectAppKit(pid: pid_t) -> (NSRect, Bool)? {
+        guard AXIsProcessTrusted() else { return nil }
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, 0.025)
+        guard let element = focusedElement(axApp) ?? systemFocusedElement(pid: pid) else { return nil }
         // Нативные Cocoa → range-путь; веб/Electron → text-marker (приватные AX-атрибуты).
         let index = insertionIndex(of: element)
         guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else { return nil }
@@ -224,12 +232,20 @@ final class CaretIndicator {
             rect.size.height.isFinite && rect.size.height >= 1 && (0...4).contains(rect.size.width)
     }
 
-    /// Electron/Chromium строят дерево a11y лениво — поднимаем его приватным атрибутом
-    /// AXManualAccessibility (так делают TextSniper/PopClip). Идемпотентно (на уже включённом
-    /// Chromium и на нативных приложениях — no-op). Без кэша по pid: pid переиспользуются при
-    /// перезапуске приложений, а кэш «навсегда» ломал бы флаг для перезапущенного Electron.
-    private func enableChromiumA11y(_ axApp: AXUIElement) {
-        AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    private func focusedElement(_ owner: AXUIElement) -> AXUIElement? {
+        var raw: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(owner, kAXFocusedUIElementAttribute as CFString, &raw) == .success,
+              let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+        return (raw as! AXUIElement)
+    }
+
+    private func systemFocusedElement(pid: pid_t) -> AXUIElement? {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.025)
+        guard let element = focusedElement(system) else { return nil }
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(element, &owner) == .success, owner == pid else { return nil }
+        return element
     }
 
     /// Веб/Electron: каретка приходит через AXTextMarker, а не CFRange. Приватные,

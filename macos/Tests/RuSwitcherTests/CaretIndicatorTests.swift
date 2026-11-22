@@ -38,4 +38,12 @@ struct CaretIndicatorTests {
         #expect(CaretIndicator.badgeLabel("iw") == "HE")
         #expect(CaretIndicator.badgeLabel(nil) == nil)
     }
+    @Test func pointerFallbackStaysOnCurrentDisplay() {
+        let screen = CGRect(x: -500, y: 40, width: 500, height: 300)
+        let size = CGSize(width: 28, height: 19)
+        #expect(CaretIndicator.pointerOrigin(for: CGPoint(x: -200, y: 120), size: size, visible: screen)
+                == CGPoint(x: -187, y: 96))
+        #expect(CaretIndicator.pointerOrigin(for: CGPoint(x: -2, y: 43), size: size, visible: screen)
+                == CGPoint(x: -43, y: 40))
+    }
 }
