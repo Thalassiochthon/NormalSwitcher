@@ -174,6 +174,11 @@ final class CaretIndicator: NSObject {
         if persistent {
             if case .known(let rect, _) = caret, positionAboveCaret(rect) {
                 pointerAnchor = nil
+            } else if case .editorWithoutCaret(let frame?) = caret, positionAboveCaret(frame) {
+                if !visible || pointerAnchor != nil {
+                    rslog("layout-indicator: editor edge app=\(app.bundleIdentifier ?? "unknown")")
+                }
+                pointerAnchor = nil
             } else {
                 let hasEditor: Bool
                 if case .editorWithoutCaret = caret { hasEditor = true } else { hasEditor = false }
@@ -210,7 +215,7 @@ final class CaretIndicator: NSObject {
     private func positionAtPointerAnchor(app: NSRunningApplication, refresh: Bool) -> Bool {
         let now = ProcessInfo.processInfo.systemUptime
         let pid = app.processIdentifier
-        if pointerAnchor?.pid != pid || pointerAnchor?.expires ?? 0 <= now { pointerAnchor = nil }
+        if pointerAnchor?.pid != pid || (pointerAnchor?.expires ?? 0) <= now { pointerAnchor = nil }
         if refresh {
             // Pin the fallback where it first appeared so the button stays clickable.
             if pointerAnchor == nil {
@@ -315,7 +320,7 @@ final class CaretIndicator: NSObject {
 
     private enum CaretLocation {
         case known(NSRect, rtl: Bool)
-        case editorWithoutCaret
+        case editorWithoutCaret(NSRect?)
         case unavailable
         case protectedField
     }
@@ -325,26 +330,27 @@ final class CaretIndicator: NSObject {
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, persistent ? 0.012 : 0.025)
         let appFocus = focusedElement(axApp)
-        var sawEditor = false
+        var editorFallback: CaretLocation?
         func inspect(_ element: AXUIElement) -> CaretLocation? {
-            switch caretLocation(in: element) {
+            let location = caretLocation(in: element)
+            switch location {
             case .unavailable: return nil
-            case .editorWithoutCaret:
-                sawEditor = true
+            case .editorWithoutCaret(let anchor):
+                if anchor != nil || editorFallback == nil { editorFallback = location }
                 return nil
-            case let location: return location
+            default: return location
             }
         }
         if let appFocus, let location = inspect(appFocus) { return location }
         let systemFocus = systemFocusedElement(pid: pid)
         if let systemFocus, appFocus.map({ !CFEqual($0, systemFocus) }) ?? true,
            let location = inspect(systemFocus) { return location }
-        if persistent, !sawEditor, let editor = resolvedEditor(pid),
+        if persistent, editorFallback == nil, let editor = resolvedEditor(pid),
            appFocus.map({ !CFEqual($0, editor) }) ?? true,
            systemFocus.map({ !CFEqual($0, editor) }) ?? true {
-            return inspect(editor) ?? .editorWithoutCaret
+            return inspect(editor) ?? editorFallback ?? .editorWithoutCaret(editorAnchor(in: editor))
         }
-        return sawEditor ? .editorWithoutCaret : .unavailable
+        return editorFallback ?? .unavailable
     }
 
     private func caretLocation(in element: AXUIElement) -> CaretLocation {
@@ -355,7 +361,8 @@ final class CaretIndicator: NSObject {
         // Нативные Cocoa → range-путь; веб/Electron → text-marker (приватные AX-атрибуты).
         let index = insertionIndex(of: element)
         guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else {
-            return persistent && (index != nil || isEditableField(element)) ? .editorWithoutCaret : .unavailable
+            guard persistent, index != nil || isEditableField(element) else { return .unavailable }
+            return .editorWithoutCaret(editorAnchor(in: element))
         }
         var rtl = false
         if !persistent, let index {
@@ -375,6 +382,25 @@ final class CaretIndicator: NSObject {
         var r = topLeft
         r.origin.y = primary.frame.height - topLeft.origin.y - topLeft.height
         return .known(r, rtl: rtl)
+    }
+
+    private func editorAnchor(in element: AXUIElement) -> NSRect? {
+        func frameValue(_ key: String) -> AXValue? {
+            var raw: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, key as CFString, &raw) == .success,
+                  let raw, CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+            return (raw as! AXValue)
+        }
+
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard let pointValue = frameValue(kAXPositionAttribute), AXValueGetValue(pointValue, .cgPoint, &position),
+              let sizeValue = frameValue(kAXSizeAttribute), AXValueGetValue(sizeValue, .cgSize, &size),
+              size.width >= 20, (8...400).contains(size.height),
+              let primary = NSScreen.screens.first else { return nil }
+        // Use the field's leading edge when its exact insertion point is missing.
+        return NSRect(x: position.x + 12, y: primary.frame.height - position.y - size.height,
+                      width: 0, height: size.height)
     }
 
     private func isEditableField(_ element: AXUIElement) -> Bool {
