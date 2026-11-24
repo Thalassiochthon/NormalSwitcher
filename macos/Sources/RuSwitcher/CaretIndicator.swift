@@ -26,7 +26,7 @@ final class CaretIndicator: NSObject {
 
     private var hideTimer: Timer?
     private var visible = false
-    private var targetOpacity: CGFloat = 0
+    private var pointerAnchor: (pid: pid_t, point: CGPoint, expires: TimeInterval)?
 
     /// Сколько держим плашку после переключения, прежде чем спрятать сам (если не печатают).
     private let showDuration: TimeInterval = 1.0
@@ -89,6 +89,7 @@ final class CaretIndicator: NSObject {
     func configure(persistent enabled: Bool) {
         guard enabled != persistent else { return }
         persistent = enabled
+        pointerAnchor = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
         hide()
@@ -139,7 +140,7 @@ final class CaretIndicator: NSObject {
         hideTimer?.invalidate(); hideTimer = nil
         panel.orderOut(nil)
         panel.alphaValue = 0
-        targetOpacity = 0
+        pointerAnchor = nil
         visible = false
     }
 
@@ -151,6 +152,7 @@ final class CaretIndicator: NSObject {
               app.bundleIdentifier != Bundle.main.bundleIdentifier,
               !persistent || !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier),
               let name = Self.badgeLabel(LayoutSwitcher.currentLanguageCode()) ?? LayoutSwitcher.currentInputSourceName() else {
+            pointerAnchor = nil
             hide()
             return
         }
@@ -162,14 +164,26 @@ final class CaretIndicator: NSObject {
         let labelWidth = min(130, max(18, ceil(label.intrinsicContentSize.width)))
         let size = NSSize(width: labelWidth + (persistent ? 34 : 12), height: persistent ? 21 : 19)
         if panel.frame.size != size { panel.setContentSize(size) }
+        let caret = caretLocation(pid: app.processIdentifier)
+        if case .protectedField = caret {
+            pointerAnchor = nil
+            hide()
+            return
+        }
         if persistent {
-            guard let (rect, _) = axCaretRectAppKit(pid: app.processIdentifier), positionAboveCaret(rect) else {
+            if case .known(let rect, _) = caret, positionAboveCaret(rect) {
+                pointerAnchor = nil
+            } else if !positionAtPointerAnchor(pid: app.processIdentifier) {
                 hide()
                 return
             }
             panel.ignoresMouseEvents = !correctionButton.isEnabled
-        } else if let (rect, rtl) = axCaretRectAppKit(pid: app.processIdentifier),
-                  position(forCaret: rect, rtl: rtl) {
+            panel.alphaValue = panel.frame.contains(NSEvent.mouseLocation) ? 0.92 : 0.68
+            if !panel.isVisible { panel.orderFrontRegardless() }
+            visible = true
+            return
+        }
+        if case .known(let rect, let rtl) = caret, position(forCaret: rect, rtl: rtl) {
             rslog("layout-indicator: caret")
         } else if positionBesidePointer(NSEvent.mouseLocation) {
             rslog("layout-indicator: pointer")
@@ -179,19 +193,29 @@ final class CaretIndicator: NSObject {
         }
         if !visible {
             if !panel.isVisible { panel.orderFrontRegardless() }
+            fade(to: 1, duration: 0.12)
             visible = true
         }
-        if persistent {
-            // The existing caret refresh also checks hover, including click-through states.
-            let hovered = panel.frame.contains(NSEvent.mouseLocation)
-            fade(to: hovered ? 0.92 : 0.58, duration: 0.12)
-            return
-        }
-        fade(to: 1, duration: 0.12)
         hideTimer?.invalidate()
         hideTimer = Timer.scheduledTimer(withTimeInterval: showDuration, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.hide() }
         }
+    }
+
+    private func positionAtPointerAnchor(pid: pid_t) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        if pointerAnchor?.pid != pid { pointerAnchor = nil }
+        if correctionButton.isEnabled {
+            // Pin the fallback where it first appeared so the button stays clickable.
+            if pointerAnchor == nil { rslog("layout-indicator: persistent pointer fallback") }
+            let point = pointerAnchor?.point ?? NSEvent.mouseLocation
+            pointerAnchor = (pid, point, now + showDuration)
+        }
+        guard let anchor = pointerAnchor, anchor.expires > now else {
+            pointerAnchor = nil
+            return false
+        }
+        return positionBesidePointer(anchor.point)
     }
 
     static func aboveCaretOrigin(_ caret: CGRect, size: CGSize, visible: CGRect) -> CGPoint? {
@@ -219,13 +243,15 @@ final class CaretIndicator: NSObject {
         guard visible else { return }
         visible = false
         panel.ignoresMouseEvents = true
-        // Остаётся ordered-in на alpha 0 — невидимо и click-through; полный orderOut в teardown().
-        fade(to: 0, duration: 0.18)
+        if persistent {
+            panel.orderOut(nil)
+            panel.alphaValue = 0
+        } else {
+            fade(to: 0, duration: 0.18)
+        }
     }
 
     private func fade(to alpha: CGFloat, duration: TimeInterval) {
-        guard targetOpacity != alpha else { return }
-        targetOpacity = alpha
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = duration
             panel.animator().alphaValue = alpha
@@ -279,20 +305,34 @@ final class CaretIndicator: NSObject {
         return true
     }
 
-    private func axCaretRectAppKit(pid: pid_t) -> (NSRect, Bool)? {
-        guard AXIsProcessTrusted() else { return nil }
+    private enum CaretLocation {
+        case known(NSRect, rtl: Bool)
+        case unavailable
+        case protectedField
+    }
+
+    private func caretLocation(pid: pid_t) -> CaretLocation {
+        guard AXIsProcessTrusted() else { return .unavailable }
         let axApp = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(axApp, persistent ? 0.006 : 0.025)
-        guard let element = focusedElement(axApp) ?? systemFocusedElement(pid: pid) else { return nil }
-        if persistent {
-            AXUIElementSetMessagingTimeout(element, 0.006)
-            var subrole: CFTypeRef?
-            if AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole) == .success,
-               subrole as? String == kAXSecureTextFieldSubrole { return nil }
+        AXUIElementSetMessagingTimeout(axApp, persistent ? 0.012 : 0.025)
+        let appFocus = focusedElement(axApp)
+        if let appFocus {
+            let result = caretLocation(in: appFocus)
+            if case .unavailable = result {} else { return result }
         }
+        guard let systemFocus = systemFocusedElement(pid: pid),
+              appFocus.map({ !CFEqual($0, systemFocus) }) ?? true else { return .unavailable }
+        return caretLocation(in: systemFocus)
+    }
+
+    private func caretLocation(in element: AXUIElement) -> CaretLocation {
+        AXUIElementSetMessagingTimeout(element, persistent ? 0.012 : 0.025)
+        var subrole: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole) == .success,
+           subrole as? String == kAXSecureTextFieldSubrole { return .protectedField }
         // Нативные Cocoa → range-путь; веб/Electron → text-marker (приватные AX-атрибуты).
         let index = insertionIndex(of: element)
-        guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else { return nil }
+        guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else { return .unavailable }
         var rtl = false
         if !persistent, let index {
             // Compare insertion positions on this line; no text content is needed.
@@ -307,10 +347,10 @@ final class CaretIndicator: NSObject {
 
         // AX отдаёт глобальные координаты с началом сверху-слева ОСНОВНОГО экрана; AppKit — снизу-слева.
         // Отражаем по полной высоте основного экрана (screens.first), не по visibleFrame, не по целевому.
-        guard let primary = NSScreen.screens.first else { return nil }
+        guard let primary = NSScreen.screens.first else { return .unavailable }
         var r = topLeft
         r.origin.y = primary.frame.height - topLeft.origin.y - topLeft.height
-        return (r, rtl)
+        return .known(r, rtl: rtl)
     }
 
     private func insertionIndex(of element: AXUIElement) -> Int? {
