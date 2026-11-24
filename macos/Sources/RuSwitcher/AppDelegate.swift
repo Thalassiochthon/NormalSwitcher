@@ -1359,6 +1359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if caretIndicator == nil {
                 let indicator = CaretIndicator()
                 indicator.canCorrect = { [weak self] in self?.keyboardMonitor.caretWord() != nil }
+                indicator.resolvedEditor = { [weak self] in self?.textConverter.verifiedEditorForCaret(pid: $0) }
                 indicator.onCorrect = { [weak self] in self?.correctAndRememberCaretWord() }
                 caretIndicator = indicator
                 keyboardMonitor.caretControlHitTest = { [weak indicator] in

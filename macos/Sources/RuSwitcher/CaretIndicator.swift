@@ -21,6 +21,7 @@ final class CaretIndicator: NSObject {
     private var refreshTimer: Timer?
     private var persistent = false
     var canCorrect: () -> Bool = { false }
+    var resolvedEditor: (pid_t) -> AXUIElement? = { _ in nil }
     var onCorrect: () -> Void = {}
 
 
@@ -127,7 +128,7 @@ final class CaretIndicator: NSObject {
     /// Реальная смена раскладки → показать код раскладки (на showDuration).
     func layoutChanged() {
         guard persistent || SettingsManager.shared.caretFlag else { return }
-        showAtCaret()
+        showAtCaret(layoutChanged: true)
     }
 
     /// Любой ввод/клик пользователя → прячем (issue #10: «скрывать при печати»).
@@ -146,7 +147,7 @@ final class CaretIndicator: NSObject {
 
     // MARK: - Internals
 
-    private func showAtCaret() {
+    private func showAtCaret(layoutChanged: Bool = false) {
         guard !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
               let app = NSWorkspace.shared.frontmostApplication,
               app.bundleIdentifier != Bundle.main.bundleIdentifier,
@@ -173,9 +174,13 @@ final class CaretIndicator: NSObject {
         if persistent {
             if case .known(let rect, _) = caret, positionAboveCaret(rect) {
                 pointerAnchor = nil
-            } else if !positionAtPointerAnchor(pid: app.processIdentifier) {
-                hide()
-                return
+            } else {
+                let hasEditor: Bool
+                if case .editorWithoutCaret = caret { hasEditor = true } else { hasEditor = false }
+                guard positionAtPointerAnchor(app: app, refresh: hasEditor || layoutChanged || correctionButton.isEnabled) else {
+                    hide()
+                    return
+                }
             }
             panel.ignoresMouseEvents = !correctionButton.isEnabled
             panel.alphaValue = panel.frame.contains(NSEvent.mouseLocation) ? 0.92 : 0.68
@@ -202,12 +207,15 @@ final class CaretIndicator: NSObject {
         }
     }
 
-    private func positionAtPointerAnchor(pid: pid_t) -> Bool {
+    private func positionAtPointerAnchor(app: NSRunningApplication, refresh: Bool) -> Bool {
         let now = ProcessInfo.processInfo.systemUptime
-        if pointerAnchor?.pid != pid { pointerAnchor = nil }
-        if correctionButton.isEnabled {
+        let pid = app.processIdentifier
+        if pointerAnchor?.pid != pid || pointerAnchor?.expires ?? 0 <= now { pointerAnchor = nil }
+        if refresh {
             // Pin the fallback where it first appeared so the button stays clickable.
-            if pointerAnchor == nil { rslog("layout-indicator: persistent pointer fallback") }
+            if pointerAnchor == nil {
+                rslog("layout-indicator: persistent pointer fallback app=\(app.bundleIdentifier ?? "unknown")")
+            }
             let point = pointerAnchor?.point ?? NSEvent.mouseLocation
             pointerAnchor = (pid, point, now + showDuration)
         }
@@ -307,6 +315,7 @@ final class CaretIndicator: NSObject {
 
     private enum CaretLocation {
         case known(NSRect, rtl: Bool)
+        case editorWithoutCaret
         case unavailable
         case protectedField
     }
@@ -316,13 +325,26 @@ final class CaretIndicator: NSObject {
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, persistent ? 0.012 : 0.025)
         let appFocus = focusedElement(axApp)
-        if let appFocus {
-            let result = caretLocation(in: appFocus)
-            if case .unavailable = result {} else { return result }
+        var sawEditor = false
+        func inspect(_ element: AXUIElement) -> CaretLocation? {
+            switch caretLocation(in: element) {
+            case .unavailable: return nil
+            case .editorWithoutCaret:
+                sawEditor = true
+                return nil
+            case let location: return location
+            }
         }
-        guard let systemFocus = systemFocusedElement(pid: pid),
-              appFocus.map({ !CFEqual($0, systemFocus) }) ?? true else { return .unavailable }
-        return caretLocation(in: systemFocus)
+        if let appFocus, let location = inspect(appFocus) { return location }
+        let systemFocus = systemFocusedElement(pid: pid)
+        if let systemFocus, appFocus.map({ !CFEqual($0, systemFocus) }) ?? true,
+           let location = inspect(systemFocus) { return location }
+        if persistent, !sawEditor, let editor = resolvedEditor(pid),
+           appFocus.map({ !CFEqual($0, editor) }) ?? true,
+           systemFocus.map({ !CFEqual($0, editor) }) ?? true {
+            return inspect(editor) ?? .editorWithoutCaret
+        }
+        return sawEditor ? .editorWithoutCaret : .unavailable
     }
 
     private func caretLocation(in element: AXUIElement) -> CaretLocation {
@@ -332,7 +354,9 @@ final class CaretIndicator: NSObject {
            subrole as? String == kAXSecureTextFieldSubrole { return .protectedField }
         // Нативные Cocoa → range-путь; веб/Electron → text-marker (приватные AX-атрибуты).
         let index = insertionIndex(of: element)
-        guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else { return .unavailable }
+        guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else {
+            return persistent && (index != nil || isEditableField(element)) ? .editorWithoutCaret : .unavailable
+        }
         var rtl = false
         if !persistent, let index {
             // Compare insertion positions on this line; no text content is needed.
@@ -351,6 +375,16 @@ final class CaretIndicator: NSObject {
         var r = topLeft
         r.origin.y = primary.frame.height - topLeft.origin.y - topLeft.height
         return .known(r, rtl: rtl)
+    }
+
+    private func isEditableField(_ element: AXUIElement) -> Bool {
+        var raw: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, "AXEditable" as CFString, &raw) == .success,
+           let editable = raw as? Bool { return editable }
+        raw = nil
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &raw) == .success,
+              let role = raw as? String else { return false }
+        return [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role)
     }
 
     private func insertionIndex(of element: AXUIElement) -> Int? {

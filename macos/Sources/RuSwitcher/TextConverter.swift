@@ -514,10 +514,10 @@ final class TextConverter {
         lastFocusRequest = nil
     }
 
-    func prepareEditorContext(pid: pid_t) {
+    func prepareEditorContext(pid: pid_t, retryInterval: TimeInterval = 0.4) {
         let now = ProcessInfo.processInfo.systemUptime
         guard AXIsProcessTrusted(), !preparingFocus,
-              lastFocusRequest?.pid != pid || now - (lastFocusRequest?.time ?? 0) > 0.4 else { return }
+              lastFocusRequest?.pid != pid || now - (lastFocusRequest?.time ?? 0) > retryInterval else { return }
         lastFocusRequest = (pid, now)
         let generation = focusGeneration
         let canRequestAccessibility = lastAccessibilityRequest?.pid != pid
@@ -549,6 +549,16 @@ final class TextConverter {
                 if self.focusGeneration == generation, let focus { self.preparedFocus = focus }
             }
         }
+    }
+
+    func verifiedEditorForCaret(pid: pid_t) -> AXUIElement? {
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.030
+        if let focus = preparedFocus, focus.pid == pid,
+           orderedFocusMatches(focus, pid: pid, deadline: deadline) {
+            return focus.element
+        }
+        prepareEditorContext(pid: pid, retryInterval: 1.5)
+        return nil
     }
 
     private func orderedFocus(pid: pid_t, deadline: TimeInterval) -> OrderedFocus? {
