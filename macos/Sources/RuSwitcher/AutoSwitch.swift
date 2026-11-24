@@ -82,11 +82,6 @@ enum LayoutVerdict { case switchToConverted, keep, undecided }
 enum LayoutDetector {
     @MainActor
     static func decide(typed: String, converted: String, currentLang: String, otherLang: String, capsLock: Bool) -> LayoutVerdict {
-        // always-convert — ЯВНЫЙ override: матчим по СКОНВЕРТИРОВАННОЙ (целевой) форме.
-        // В список кладётся целевое слово (напр. «жоппа»); так правильно набранное слово
-        // не даёт пинг-понг. Жёсткие гейты (secure/denied-app/never) проверены ДО decide.
-        if AutoSwitchPolicy.isAlwaysConvert(converted) { return .switchToConverted }
-
         // --- мягкие вето (дёшево, до словаря) ---
         // 1 буква — не трогаем никогда (неоднозначность запредельная). 2 буквы —
         // отдельная ветка ниже через частотный список (ShortWords), т.к. на такой длине
@@ -247,11 +242,28 @@ enum LayoutDetector {
     @MainActor
     static func plan(typed: String, converted: String, canSplit: Bool,
                      currentLang: String, otherLang: String, capsLock: Bool,
-                     suffixConvertible: Bool = true) -> AutoPlan {
+                     suffixConvertible: Bool = true,
+                     alwaysConvertWords: Set<String> = SettingsManager.shared.alwaysConvertWordsSet) -> AutoPlan {
         let t = Array(typed), c = Array(converted)
         var coreLength = t.count
         let core = trailingCoreLength(typed: typed, converted: converted, suffixConvertible: suffixConvertible)
-        if canSplit, core < t.count, core > 0, c.count == t.count {
+        let canSplitTrailing = canSplit && core < t.count && core > 0 && c.count == t.count
+        if !alwaysConvertWords.isEmpty {
+            if alwaysConvertWords.contains(typed.lowercased())
+                || (canSplitTrailing && alwaysConvertWords.contains(String(t[..<core]).lowercased())) {
+                return .skip(.keep)
+            }
+            // Prefer the learned spelling, including letters on punctuation keys (e.g. б on ,).
+            // Any remaining suffix stays punctuation and the dictionary cannot override this choice.
+            let shortest = canSplitTrailing ? core : t.count
+            for length in stride(from: t.count, through: shortest, by: -1) {
+                if length < t.count, neverInWord.contains(t[length]) { continue }
+                if alwaysConvertWords.contains(String(c.prefix(length)).lowercased()) {
+                    return .convert(coreLength: length)
+                }
+            }
+        }
+        if canSplitTrailing {
             coreLength = core
             // Для пар с ивритом разбор не нужен: направление «в иврит» авто-путём не
             // конвертится by design, а ивритский словарь принимает любые буквы.
@@ -455,15 +467,6 @@ enum AutoSwitchPolicy {
         let set = SettingsManager.shared.deniedWordsSet
         guard !set.isEmpty else { return false }
         return set.contains(typed.lowercased()) || set.contains(converted.lowercased())
-    }
-
-    /// Слово в списке always-convert — матчим по СКОНВЕРТИРОВАННОЙ (целевой) форме.
-    /// В список кладётся «целевое» слово (что должно получиться), а не мусор раскладки —
-    /// иначе правильно набранное слово конвертилось бы обратно (пинг-понг).
-    static func isAlwaysConvert(_ converted: String) -> Bool {
-        let set = SettingsManager.shared.alwaysConvertWordsSet
-        guard !set.isEmpty else { return false }
-        return set.contains(converted.lowercased())
     }
 
     /// Клиенты удалённого рабочего стола: когда такое окно в фокусе, текст живёт

@@ -487,6 +487,9 @@ final class SettingsWindowController {
             check(taskText("Keep layout and correction controls at the caret (beta)",
                            "Показывать плашку с исправлением у курсора (бета)"),
                   s.caretTools, #selector(caretToolsChanged(_:))),
+            check(taskText("Remember words corrected with the arrow",
+                           "Запоминать слова после исправления стрелкой"),
+                  s.caretLearnsCorrections, #selector(caretLearningChanged(_:))),
         ])
         let manual = SettingsDisclosure(title: L10n.settingsGroupManual, views: [
             check(L10n.settingsSmartConversion, s.smartConversion, #selector(smartConversionChanged(_:))),
@@ -969,6 +972,11 @@ final class SettingsWindowController {
 
     @objc private func caretToolsChanged(_ sender: NSButton) {
         SettingsManager.shared.caretTools = sender.state == .on
+        onCaretFlagChanged?(SettingsManager.shared.caretFlag)
+    }
+
+    @objc private func caretLearningChanged(_ sender: NSButton) {
+        SettingsManager.shared.caretLearnsCorrections = sender.state == .on
         onCaretFlagChanged?(SettingsManager.shared.caretFlag)
     }
 

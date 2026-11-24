@@ -652,6 +652,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     rslog("auto: len=\(fullPair.original.count) \(langs.current)/\(langs.opposite) plan=\(plan)")  // слова не логируем (приватность)
                     return nil
                 }
+                guard !AutoSwitchPolicy.isDeniedWord(String(fullPair.original.prefix(core)),
+                                                     String(fullPair.converted.prefix(core))) else { return nil }
                 return core
             },
             convertedCore: { String(fullPair.converted.prefix($0)) },
@@ -1360,13 +1362,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let indicator = CaretIndicator()
                 indicator.canCorrect = { [weak self] in self?.keyboardMonitor.caretWord() != nil }
                 indicator.resolvedEditor = { [weak self] in self?.textConverter.verifiedEditorForCaret(pid: $0) }
-                indicator.onCorrect = { [weak self] in self?.correctAndRememberCaretWord() }
+                indicator.onCorrect = { [weak self] in self?.correctCaretWord() }
                 caretIndicator = indicator
                 keyboardMonitor.caretControlHitTest = { [weak indicator] in
                     MainActor.assumeIsolated { indicator?.hitCorrectionButton() == true }
                 }
             }
-            caretIndicator?.configure(persistent: settings.caretTools)
+            caretIndicator?.configure(persistent: settings.caretTools,
+                                      learnsCorrections: settings.caretLearnsCorrections)
         } else {
             keyboardMonitor.caretControlHitTest = nil
             caretIndicator?.teardown()
@@ -1374,8 +1377,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func correctAndRememberCaretWord() {
-        guard SettingsManager.shared.caretTools,
+    private func correctCaretWord() {
+        let settings = SettingsManager.shared
+        guard settings.caretTools,
               let (candidate, spaces) = keyboardMonitor.caretWord(),
               let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier == candidate.pid,
               !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
@@ -1386,28 +1390,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               !AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) else { return }
 
         let tail = String(repeating: " ", count: spaces)
-        let word = pair.converted.lowercased()
         let pid = app.processIdentifier
         let failure = textConverter.replaceBeforeBoundary(
             original: pair.original + tail, insert: pair.converted + tail,
             deleteCount: candidate.keys.count + spaces, switchesLayout: true,
             key: nil, app: app, layoutID: candidate.layoutID,
             deadline: ProcessInfo.processInfo.systemUptime + 0.12,
-            onVerified: { [weak self] in
-                guard let self else { return }
-                let settings = SettingsManager.shared
-                if !settings.alwaysConvertWordsSet.contains(word) {
-                    settings.alwaysConvertWords.append(word)
-                    self.settingsController.reloadExceptionLists()
-                }
-                self.caretIndicator?.indicateRememberedWord()
-                rslog("caret correction: verified and remembered")
-            },
             post: { $0.postToPid(pid) }
         )
         if let failure {
             rslog("caret correction: skipped \(failure.rawValue)")
             return
+        }
+        // The click confirms which word to learn. The edit has passed the editor checks
+        // and been posted; a second accessibility read can lag behind or lose focus.
+        if settings.caretLearnsCorrections {
+            let word = pair.converted.lowercased()
+            if !settings.alwaysConvertWordsSet.contains(word) {
+                settings.alwaysConvertWords.append(word)
+                settingsController.reloadExceptionLists()
+            }
+            caretIndicator?.indicateRememberedWord()
+            rslog("caret correction: events posted and word remembered")
         }
         keyboardMonitor.markConverted()
         lastAutoConverted = nil

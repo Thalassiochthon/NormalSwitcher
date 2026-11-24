@@ -69,8 +69,6 @@ final class CaretIndicator: NSObject {
         super.init()
         correctionButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
         correctionButton.isBordered = false
-        correctionButton.toolTip = taskText("Correct and remember the last word", "Исправить и запомнить последнее слово")
-        correctionButton.setAccessibilityLabel(correctionButton.toolTip)
         correctionButton.target = self
         correctionButton.action = #selector(correctLastWord)
         correctionButton.isHidden = true
@@ -87,7 +85,12 @@ final class CaretIndicator: NSObject {
         ])
     }
 
-    func configure(persistent enabled: Bool) {
+    func configure(persistent enabled: Bool, learnsCorrections: Bool) {
+        let title = learnsCorrections
+            ? taskText("Correct and remember the last word", "Исправить и запомнить последнее слово")
+            : taskText("Correct the last word", "Исправить последнее слово")
+        correctionButton.toolTip = title
+        correctionButton.setAccessibilityLabel(title)
         guard enabled != persistent else { return }
         persistent = enabled
         pointerAnchor = nil

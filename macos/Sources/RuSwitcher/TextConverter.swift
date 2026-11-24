@@ -196,8 +196,7 @@ final class TextConverter {
     /// The original delimiter is returned by the tap, including its original modifiers and keyUp.
     func replaceBeforeBoundary(original: String, insert: String, deleteCount: Int, switchesLayout: Bool,
                                key: WordEndKey?, app: NSRunningApplication, layoutID: String,
-                               deadline: TimeInterval, onVerified: (() -> Void)? = nil,
-                               post: (CGEvent) -> Void) -> AutomaticEditFailure? {
+                               deadline: TimeInterval, post: (CGEvent) -> Void) -> AutomaticEditFailure? {
         let pid = app.processIdentifier
         func hasTime(_ reserve: TimeInterval = 0) -> Bool {
             ProcessInfo.processInfo.systemUptime + reserve < deadline
@@ -238,10 +237,7 @@ final class TextConverter {
             return Self.axRange(ranges[0])
         }
 
-        func readSuffix(_ range: CFRange, until readDeadline: TimeInterval) -> String? {
-            func hasTime(_ reserve: TimeInterval) -> Bool {
-                ProcessInfo.processInfo.systemUptime + reserve < readDeadline
-            }
+        func readSuffix(_ range: CFRange) -> String? {
             guard hasTime(0.006) else { return nil }
             var value = range
             guard let parameter = AXValueCreate(.cfRange, &value) else { return nil }
@@ -261,7 +257,7 @@ final class TextConverter {
 
         let initial = Self.readSettledSuffix(read: {
             Self.verifyEditorSuffix(original: original, caret: readCaret(),
-                                    allowInitialCapital: switchesLayout) { readSuffix($0, until: deadline) }
+                                    allowInitialCapital: switchesLayout, readSuffix: readSuffix)
         }, beforeRetry: {
             guard hasTime(0.033) else { return .deadline }
             // Give the editor a chance to process the preceding key before the delimiter.
@@ -287,7 +283,7 @@ final class TextConverter {
         }
         if case .failure(let failure) = Self.verifyEditorSuffix(
             original: verified.text, caret: readCaret(), expectedLocation: range.location,
-            readSuffix: { readSuffix($0, until: deadline) }
+            readSuffix: readSuffix
         ) {
             return failure
         }
@@ -303,18 +299,6 @@ final class TextConverter {
             clearState()
         }
         events.forEach(post)
-        if let onVerified {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.075) { [weak self] in
-                guard let self, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-                      !AutoSwitchPolicy.secureInputActive else { return }
-                let verificationDeadline = ProcessInfo.processInfo.systemUptime + 0.035
-                let resultRange = CFRange(location: range.location, length: normalized.utf16.count)
-                guard self.orderedFocusMatches(target, pid: pid, deadline: verificationDeadline),
-                      let actual = readSuffix(resultRange, until: verificationDeadline),
-                      actual.utf16.elementsEqual(normalized.utf16) else { return }
-                onVerified()
-            }
-        }
         if verified.initialCapital { rslog("word-end: preserved editor capitalization") }
         return nil
     }
