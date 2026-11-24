@@ -26,6 +26,7 @@ final class CaretIndicator: NSObject {
 
     private var hideTimer: Timer?
     private var visible = false
+    private var targetOpacity: CGFloat = 0
 
     /// Сколько держим плашку после переключения, прежде чем спрятать сам (если не печатают).
     private let showDuration: TimeInterval = 1.0
@@ -137,6 +138,8 @@ final class CaretIndicator: NSObject {
         refreshTimer = nil
         hideTimer?.invalidate(); hideTimer = nil
         panel.orderOut(nil)
+        panel.alphaValue = 0
+        targetOpacity = 0
         visible = false
     }
 
@@ -176,10 +179,15 @@ final class CaretIndicator: NSObject {
         }
         if !visible {
             if !panel.isVisible { panel.orderFrontRegardless() }
-            fade(to: 1, duration: 0.12)
             visible = true
         }
-        guard !persistent else { return }
+        if persistent {
+            // The existing caret refresh also checks hover, including click-through states.
+            let hovered = panel.frame.contains(NSEvent.mouseLocation)
+            fade(to: hovered ? 0.92 : 0.58, duration: 0.12)
+            return
+        }
+        fade(to: 1, duration: 0.12)
         hideTimer?.invalidate()
         hideTimer = Timer.scheduledTimer(withTimeInterval: showDuration, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.hide() }
@@ -216,6 +224,8 @@ final class CaretIndicator: NSObject {
     }
 
     private func fade(to alpha: CGFloat, duration: TimeInterval) {
+        guard targetOpacity != alpha else { return }
+        targetOpacity = alpha
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = duration
             panel.animator().alphaValue = alpha
