@@ -60,7 +60,31 @@ struct OrderedEditorTextTests {
             text.append("n")
             return nil
         }.get()
-        #expect(range.location == 0 && range.length == 6)
+        #expect(range.range.location == 0 && range.range.length == 6)
+    }
+
+    @Test func recognizesOnlyTheEditorCapitalizingTheFirstLetter() throws {
+        let caret = CFRange(location: 6, length: 0)
+        let suffix = try TextConverter.verifyEditorSuffix(
+            original: "ghbdtn", caret: caret, allowInitialCapital: true
+        ) { _ in "Ghbdtn" }.get()
+        #expect(suffix.range.location == 0)
+        #expect(suffix.text == "Ghbdtn")
+        #expect(suffix.applyingCapitalization(to: "привет") == "Привет")
+        for different in ["gHbdtn", "GHBDTN", "Ghbdtx"] {
+            let result = TextConverter.verifyEditorSuffix(
+                original: "ghbdtn", caret: caret, allowInitialCapital: true
+            ) { _ in different }
+            guard case .failure(.textChanged) = result else {
+                Issue.record("Only an initial capitalization can match")
+                continue
+            }
+        }
+        let strict = TextConverter.verifyEditorSuffix(original: suffix.text, caret: caret) { _ in "ghbdtn" }
+        guard case .failure(.textChanged) = strict else {
+            Issue.record("An edit between verification and replacement must be rejected")
+            return
+        }
     }
 
     @Test func stableMismatchAndContextChangeAbortTheEdit() {

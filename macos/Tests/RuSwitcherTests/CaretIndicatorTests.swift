@@ -38,6 +38,17 @@ struct CaretIndicatorTests {
         #expect(CaretIndicator.badgeLabel("iw") == "HE")
         #expect(CaretIndicator.badgeLabel(nil) == nil)
     }
+    @Test func persistentControlsStayAboveTheCaretOrFlipAtScreenEdge() {
+        let visible = CGRect(x: -500, y: 0, width: 500, height: 300)
+        let size = CGSize(width: 54, height: 21)
+        let normal = CGRect(x: -100, y: 100, width: 0, height: 18)
+        let nearTop = CGRect(x: -4, y: 280, width: 0, height: 18)
+        let notACaret = CGRect(x: -400, y: 100, width: 300, height: 18)
+        #expect(CaretIndicator.aboveCaretOrigin(normal, size: size, visible: visible) == CGPoint(x: -127, y: 122))
+        #expect(CaretIndicator.aboveCaretOrigin(nearTop, size: size, visible: visible) == CGPoint(x: -54, y: 255))
+        #expect(CaretIndicator.aboveCaretOrigin(notACaret, size: size, visible: visible) == nil)
+    }
+
     @Test func pointerFallbackStaysOnCurrentDisplay() {
         let screen = CGRect(x: -500, y: 40, width: 500, height: 300)
         let size = CGSize(width: 28, height: 19)

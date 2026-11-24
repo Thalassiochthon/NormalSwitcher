@@ -2,12 +2,27 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-/// Briefly shows the current input source beside the text caret, or beside the pointer
-/// when the frontmost app does not expose a usable caret. The panel never takes focus.
+/// Shows the input source briefly on a switch, or keeps the correction controls at the caret.
+/// The panel never takes focus.
+private final class CaretPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+private final class CaretCorrectionButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 @MainActor
-final class CaretIndicator {
+final class CaretIndicator: NSObject {
     private let panel: NSPanel
     private let label: NSTextField
+    private let correctionButton: NSButton
+    private var refreshTimer: Timer?
+    private var persistent = false
+    var canCorrect: () -> Bool = { false }
+    var onCorrect: () -> Void = {}
+
 
     private var hideTimer: Timer?
     private var visible = false
@@ -15,8 +30,8 @@ final class CaretIndicator {
     /// Сколько держим плашку после переключения, прежде чем спрятать сам (если не печатают).
     private let showDuration: TimeInterval = 1.0
 
-    init() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 30, height: 24),
+    override init() {
+        panel = CaretPanel(contentRect: NSRect(x: 0, y: 0, width: 30, height: 24),
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -48,28 +63,78 @@ final class CaretIndicator {
         label.isBezeled = false
         label.isEditable = false
         label.drawsBackground = false
-        label.translatesAutoresizingMaskIntoConstraints = false
-        backdrop.addSubview(label)
+        correctionButton = CaretCorrectionButton(frame: .zero)
+        super.init()
+        correctionButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        correctionButton.isBordered = false
+        correctionButton.toolTip = taskText("Correct and remember the last word", "Исправить и запомнить последнее слово")
+        correctionButton.setAccessibilityLabel(correctionButton.toolTip)
+        correctionButton.target = self
+        correctionButton.action = #selector(correctLastWord)
+        correctionButton.isHidden = true
+        correctionButton.widthAnchor.constraint(equalToConstant: 21).isActive = true
+        let row = NSStackView(views: [label, correctionButton])
+        row.orientation = .horizontal
+        row.spacing = 2
+        row.translatesAutoresizingMaskIntoConstraints = false
+        backdrop.addSubview(row)
         NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: backdrop.centerXAnchor),
-            label.widthAnchor.constraint(lessThanOrEqualTo: backdrop.widthAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: backdrop.centerYAnchor),
+            row.centerXAnchor.constraint(equalTo: backdrop.centerXAnchor),
+            row.widthAnchor.constraint(lessThanOrEqualTo: backdrop.widthAnchor, constant: -8),
+            row.centerYAnchor.constraint(equalTo: backdrop.centerYAnchor),
         ])
+    }
+
+    func configure(persistent enabled: Bool) {
+        guard enabled != persistent else { return }
+        persistent = enabled
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        hide()
+        guard enabled else { return }
+        let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showAtCaret() }
+        }
+        refreshTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        showAtCaret()
+    }
+
+    func hitCorrectionButton() -> Bool {
+        guard persistent, visible, correctionButton.isEnabled else { return false }
+        return panel.convertToScreen(correctionButton.convert(correctionButton.bounds, to: nil))
+            .contains(NSEvent.mouseLocation)
+    }
+
+    @objc private func correctLastWord() {
+        onCorrect()
+        correctionButton.isEnabled = false
+        panel.ignoresMouseEvents = true
+    }
+
+    func indicateRememberedWord() {
+        guard persistent, visible else { return }
+        correctionButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.correctionButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        }
     }
 
     // MARK: - Entry points (вызываются из AppDelegate)
 
     /// Реальная смена раскладки → показать код раскладки (на showDuration).
     func layoutChanged() {
-        guard SettingsManager.shared.caretFlag else { return }
+        guard persistent || SettingsManager.shared.caretFlag else { return }
         showAtCaret()
     }
 
     /// Любой ввод/клик пользователя → прячем (issue #10: «скрывать при печати»).
-    func userTyped() { if visible { hide() } }
+    func userTyped() { if visible, !persistent { hide() } }
 
     /// Фича выключена / выход — снять окно и таймер.
     func teardown() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
         hideTimer?.invalidate(); hideTimer = nil
         panel.orderOut(nil)
         visible = false
@@ -81,6 +146,7 @@ final class CaretIndicator {
         guard !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
               let app = NSWorkspace.shared.frontmostApplication,
               app.bundleIdentifier != Bundle.main.bundleIdentifier,
+              !persistent || !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier),
               let name = Self.badgeLabel(LayoutSwitcher.currentLanguageCode()) ?? LayoutSwitcher.currentInputSourceName() else {
             hide()
             return
@@ -88,10 +154,19 @@ final class CaretIndicator {
         label.stringValue = name
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 1
-        let width = min(152, max(28, ceil(label.intrinsicContentSize.width) + 12))
-        panel.setContentSize(NSSize(width: width, height: 19))
-        if let (rect, rtl) = axCaretRectAppKit(pid: app.processIdentifier),
-           position(forCaret: rect, rtl: rtl) {
+        correctionButton.isHidden = !persistent
+        correctionButton.isEnabled = persistent && canCorrect()
+        let labelWidth = min(130, max(18, ceil(label.intrinsicContentSize.width)))
+        let size = NSSize(width: labelWidth + (persistent ? 34 : 12), height: persistent ? 21 : 19)
+        if panel.frame.size != size { panel.setContentSize(size) }
+        if persistent {
+            guard let (rect, _) = axCaretRectAppKit(pid: app.processIdentifier), positionAboveCaret(rect) else {
+                hide()
+                return
+            }
+            panel.ignoresMouseEvents = !correctionButton.isEnabled
+        } else if let (rect, rtl) = axCaretRectAppKit(pid: app.processIdentifier),
+                  position(forCaret: rect, rtl: rtl) {
             rslog("layout-indicator: caret")
         } else if positionBesidePointer(NSEvent.mouseLocation) {
             rslog("layout-indicator: pointer")
@@ -99,19 +174,43 @@ final class CaretIndicator {
             hide()
             return
         }
-        if !panel.isVisible { panel.orderFrontRegardless() }            // показ БЕЗ кражи фокуса
-        fade(to: 1, duration: 0.12)
-        visible = true
+        if !visible {
+            if !panel.isVisible { panel.orderFrontRegardless() }
+            fade(to: 1, duration: 0.12)
+            visible = true
+        }
+        guard !persistent else { return }
         hideTimer?.invalidate()
         hideTimer = Timer.scheduledTimer(withTimeInterval: showDuration, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.hide() }
         }
     }
 
+    static func aboveCaretOrigin(_ caret: CGRect, size: CGSize, visible: CGRect) -> CGPoint? {
+        guard isInsertionRect(caret), visible.contains(CGPoint(x: caret.midX, y: caret.midY)),
+              size.width <= visible.width else { return nil }
+        let x = min(max(caret.midX - size.width / 2, visible.minX), visible.maxX - size.width)
+        let above = caret.maxY + 4
+        let y = above + size.height <= visible.maxY ? above : caret.minY - size.height - 4
+        guard y >= visible.minY else { return nil }
+        return CGPoint(x: x.rounded(), y: y.rounded())
+    }
+
+    private func positionAboveCaret(_ caret: CGRect) -> Bool {
+        for screen in NSScreen.screens {
+            if let origin = Self.aboveCaretOrigin(caret, size: panel.frame.size, visible: screen.visibleFrame) {
+                if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
+                return true
+            }
+        }
+        return false
+    }
+
     private func hide() {
         hideTimer?.invalidate(); hideTimer = nil
         guard visible else { return }
         visible = false
+        panel.ignoresMouseEvents = true
         // Остаётся ordered-in на alpha 0 — невидимо и click-through; полный orderOut в teardown().
         fade(to: 0, duration: 0.18)
     }
@@ -173,13 +272,19 @@ final class CaretIndicator {
     private func axCaretRectAppKit(pid: pid_t) -> (NSRect, Bool)? {
         guard AXIsProcessTrusted() else { return nil }
         let axApp = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(axApp, 0.025)
+        AXUIElementSetMessagingTimeout(axApp, persistent ? 0.006 : 0.025)
         guard let element = focusedElement(axApp) ?? systemFocusedElement(pid: pid) else { return nil }
+        if persistent {
+            AXUIElementSetMessagingTimeout(element, 0.006)
+            var subrole: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole) == .success,
+               subrole as? String == kAXSecureTextFieldSubrole { return nil }
+        }
         // Нативные Cocoa → range-путь; веб/Electron → text-marker (приватные AX-атрибуты).
         let index = insertionIndex(of: element)
         guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else { return nil }
         var rtl = false
-        if let index {
+        if !persistent, let index {
             // Compare insertion positions on this line; no text content is needed.
             if index < Int.max, let next = insertionBounds(of: element, at: index + 1),
                abs(topLeft.midY - next.midY) < 1, next.midX != topLeft.midX {
@@ -241,7 +346,7 @@ final class CaretIndicator {
 
     private func systemFocusedElement(pid: pid_t) -> AXUIElement? {
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.025)
+        AXUIElementSetMessagingTimeout(system, persistent ? 0.006 : 0.025)
         guard let element = focusedElement(system) else { return nil }
         var owner: pid_t = 0
         guard AXUIElementGetPid(element, &owner) == .success, owner == pid else { return nil }

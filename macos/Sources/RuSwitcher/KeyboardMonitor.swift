@@ -106,6 +106,13 @@ final class KeyboardMonitor: @unchecked Sendable {
     /// issue #10: включена ли фича флага-у-каретки. Гейтит диспатч onUserInput на горячем пути,
     /// чтобы при выключенной фиче (по умолчанию) не будить main-очередь на каждом нажатии.
     var caretFlagEnabled = false
+    var caretControlHitTest: (() -> Bool)?
+
+    func caretWord() -> (WordBoundary, spaces: Int)? {
+        if !currentWordKeys.isEmpty { return (boundary(.space, keys: currentWordKeys), 0) }
+        guard !prevWordKeys.isEmpty, (1...3).contains(boundaryCount) else { return nil }
+        return (boundary(.space, keys: prevWordKeys), boundaryCount)
+    }
 
     // Конфиг триггера (кэш; обновляется в start/reconfigure)
     private var triggerConfig = TriggerConfig.current()
@@ -646,6 +653,8 @@ private func keyboardCallback(
             monitor.resetInputTracking()
             if let tap = monitor.eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
+                let reason = type == .tapDisabledByTimeout ? "timeout" : "system"
+                rslog("keyboard tap: disabled reason=\(reason) reenabled=\(CGEvent.tapIsEnabled(tap: tap))")
             }
         }
         return Unmanaged.passUnretained(event)
@@ -700,7 +709,8 @@ private func keyboardCallback(
             return nil  // съедаем Caps Lock, чтобы не переключался регистр
         }
     } else if type == .leftMouseDown || type == .rightMouseDown {
-        monitor.resetInputTracking()
+        let clickedCaretControl = type == .leftMouseDown && monitor.caretControlHitTest?() == true
+        if !clickedCaretControl { monitor.resetInputTracking() }
     }
 
     return Unmanaged.passUnretained(event)

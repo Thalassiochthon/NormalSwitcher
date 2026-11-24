@@ -195,8 +195,9 @@ final class TextConverter {
 
     /// The original delimiter is returned by the tap, including its original modifiers and keyUp.
     func replaceBeforeBoundary(original: String, insert: String, deleteCount: Int, switchesLayout: Bool,
-                               key: WordEndKey, app: NSRunningApplication, layoutID: String,
-                               deadline: TimeInterval, post: (CGEvent) -> Void) -> AutomaticEditFailure? {
+                               key: WordEndKey?, app: NSRunningApplication, layoutID: String,
+                               deadline: TimeInterval, onVerified: (() -> Void)? = nil,
+                               post: (CGEvent) -> Void) -> AutomaticEditFailure? {
         let pid = app.processIdentifier
         func hasTime(_ reserve: TimeInterval = 0) -> Bool {
             ProcessInfo.processInfo.systemUptime + reserve < deadline
@@ -237,7 +238,10 @@ final class TextConverter {
             return Self.axRange(ranges[0])
         }
 
-        func readSuffix(_ range: CFRange) -> String? {
+        func readSuffix(_ range: CFRange, until readDeadline: TimeInterval) -> String? {
+            func hasTime(_ reserve: TimeInterval) -> Bool {
+                ProcessInfo.processInfo.systemUptime + reserve < readDeadline
+            }
             guard hasTime(0.006) else { return nil }
             var value = range
             guard let parameter = AXValueCreate(.cfRange, &value) else { return nil }
@@ -255,26 +259,23 @@ final class TextConverter {
             return Self.textInRange(text, range: range)
         }
 
-        func verifiedRange(caret: CFRange?, expectedLocation: Int? = nil) -> Result<CFRange, AutomaticEditFailure> {
-            Self.verifyEditorSuffix(original: original, caret: caret, expectedLocation: expectedLocation,
-                                    readSuffix: readSuffix)
-        }
-
-        let initial = Self.readSettledSuffix(read: { verifiedRange(caret: readCaret()) }, beforeRetry: {
+        let initial = Self.readSettledSuffix(read: {
+            Self.verifyEditorSuffix(original: original, caret: readCaret(),
+                                    allowInitialCapital: switchesLayout) { readSuffix($0, until: deadline) }
+        }, beforeRetry: {
             guard hasTime(0.033) else { return .deadline }
-            // Give the editor a chance to process the preceding key, while this callback
-            // still owns the delimiter. A persistent mismatch must never authorize deletion.
+            // Give the editor a chance to process the preceding key before the delimiter.
             Thread.sleep(forTimeInterval: 0.008)
             guard hasTime(0.020) else { return .deadline }
             return sameInput() ? nil : .contextChanged
         })
-        let range: CFRange
+        let verified: VerifiedEditorSuffix
         switch initial {
-        case .success(let verified): range = verified
+        case .success(let suffix): verified = suffix
         case .failure(let failure): return failure
         }
-
-        let normalized = Self.normalizedForInsert(insert)
+        let range = verified.range
+        let normalized = Self.normalizedForInsert(verified.applyingCapitalization(to: insert))
         let bySelection = range.location == 0 && AutoSwitchPolicy.isBrowser(app.bundleIdentifier)
             && !Self.containsRTL(original) && !Self.containsRTL(normalized)
             && hasTime(0.025) && focusInWebContent(from: focus, timeout: 0.006, deadline: deadline - 0.020)
@@ -284,26 +285,43 @@ final class TextConverter {
               orderedFocusMatches(target, pid: pid, deadline: deadline), sameInput() else {
             return hasTime() ? .contextChanged : .deadline
         }
-        if case .failure(let failure) = verifiedRange(caret: readCaret(), expectedLocation: range.location) {
+        if case .failure(let failure) = Self.verifyEditorSuffix(
+            original: verified.text, caret: readCaret(), expectedLocation: range.location,
+            readSuffix: { readSuffix($0, until: deadline) }
+        ) {
             return failure
         }
         guard hasTime(), sameInput() else { return hasTime() ? .contextChanged : .deadline }
 
-        if key == .space {
-            lastOriginal = original + " "
-            lastConverted = normalized + " "
+        if key == .space || key == nil {
+            let delimiter = key == .space ? " " : ""
+            lastOriginal = verified.text + delimiter
+            lastConverted = normalized + delimiter
             lastWasBuffer = true
             lastUndoSwitchesLayout = switchesLayout
         } else {
             clearState()
         }
         events.forEach(post)
+        if let onVerified {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.075) { [weak self] in
+                guard let self, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                      !AutoSwitchPolicy.secureInputActive else { return }
+                let verificationDeadline = ProcessInfo.processInfo.systemUptime + 0.035
+                let resultRange = CFRange(location: range.location, length: normalized.utf16.count)
+                guard self.orderedFocusMatches(target, pid: pid, deadline: verificationDeadline),
+                      let actual = readSuffix(resultRange, until: verificationDeadline),
+                      actual.utf16.elementsEqual(normalized.utf16) else { return }
+                onVerified()
+            }
+        }
+        if verified.initialCapital { rslog("word-end: preserved editor capitalization") }
         return nil
     }
 
-    nonisolated static func readSettledSuffix(
-        read: () -> Result<CFRange, AutomaticEditFailure>, beforeRetry: () -> AutomaticEditFailure?
-    ) -> Result<CFRange, AutomaticEditFailure> {
+    nonisolated static func readSettledSuffix<T>(
+        read: () -> Result<T, AutomaticEditFailure>, beforeRetry: () -> AutomaticEditFailure?
+    ) -> Result<T, AutomaticEditFailure> {
         let initial = read()
         switch initial {
         case .failure(.textChanged), .failure(.caretUnavailable):
@@ -314,10 +332,20 @@ final class TextConverter {
         }
     }
 
+    struct VerifiedEditorSuffix {
+        let range: CFRange
+        let text: String
+        let initialCapital: Bool
+
+        nonisolated func applyingCapitalization(to replacement: String) -> String {
+            initialCapital ? Dict.capitalizedFirst(replacement) : replacement
+        }
+    }
+
     nonisolated static func verifyEditorSuffix(
         original: String, caret: CFRange?, expectedLocation: Int? = nil,
-        readSuffix: (CFRange) -> String?
-    ) -> Result<CFRange, AutomaticEditFailure> {
+        allowInitialCapital: Bool = false, readSuffix: (CFRange) -> String?
+    ) -> Result<VerifiedEditorSuffix, AutomaticEditFailure> {
         guard let caret else { return .failure(.caretUnavailable) }
         guard caret.length == 0 else { return .failure(.selectionActive) }
         let length = original.utf16.count
@@ -325,8 +353,15 @@ final class TextConverter {
         let range = CFRange(location: caret.location - length, length: length)
         if let expectedLocation, expectedLocation != range.location { return .failure(.contextChanged) }
         guard let actual = readSuffix(range) else { return .failure(.textUnavailable) }
-        guard actual.utf16.elementsEqual(original.utf16) else { return .failure(.textChanged) }
-        return .success(range)
+        if actual.utf16.elementsEqual(original.utf16) {
+            return .success(VerifiedEditorSuffix(range: range, text: actual, initialCapital: false))
+        }
+        // Accept only the exact same spelling with its first letter capitalized.
+        guard allowInitialCapital, original.first?.isLowercase == true, actual.utf16.count == length,
+              actual.utf16.elementsEqual(Dict.capitalizedFirst(original).utf16) else {
+            return .failure(.textChanged)
+        }
+        return .success(VerifiedEditorSuffix(range: range, text: actual, initialCapital: true))
     }
 
     enum ReplacementStroke: Equatable {

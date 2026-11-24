@@ -706,19 +706,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handleAutoConvert(_ candidate: KeyboardMonitor.WordBoundary, post: ((CGEvent) -> Void)?) {
         let deadline = candidate.started + 0.12
-        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier == candidate.pid,
-              LayoutSwitcher.currentLayoutID() == candidate.layoutID,
-              !AutoSwitchPolicy.secureInputActive, LayoutSwitcher.currentSourceIsKeyboardLayout() else { return }
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            rslog("word-end: frontmost app unavailable")
+            return
+        }
 
         let attempt = UUID().uuidString.prefix(8)
         let pid = app.processIdentifier
         let trigger = candidate.key
-        func finish(_ outcome: String, reason: String? = nil) {
+        func finish(_ outcome: String, reason: String? = nil, timings: String = "") {
             let now = ProcessInfo.processInfo.systemUptime
             if let reason { lastEditorFailure = (pid, now, reason) }
             let ms = Int((now - candidate.started) * 1_000)
-            rslog("word-end id=\(attempt) app=\(app.bundleIdentifier ?? "unknown") key=\(trigger) result=\(outcome) ms=\(ms)")
+            rslog("word-end id=\(attempt) app=\(app.bundleIdentifier ?? "unknown") key=\(trigger) result=\(outcome) ms=\(ms)\(timings)")
         }
+
+        guard pid == candidate.pid else { finish("app-changed"); return }
+        guard !AutoSwitchPolicy.secureInputActive else { finish("secure-input"); return }
+        guard LayoutSwitcher.currentLayoutID() == candidate.layoutID else { finish("layout-changed"); return }
+        guard LayoutSwitcher.currentSourceIsKeyboardLayout() else { finish("non-keyboard-source"); return }
 
         let remoteMode = SettingsManager.shared.remoteDesktopMode
         if post == nil, !remoteMode, !SpotlightAX.isActive(timeout: 0.006) {
@@ -750,21 +756,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         guard let post, !spotlight, !AutoSwitchPolicy.shouldDeferToRemoteClient,
               let edit = wordEndReplacement(action, ctx) else { finish("unsupported"); return }
+        let decisionTime = ProcessInfo.processInfo.systemUptime
+        let decisionMs = Int((decisionTime - candidate.started) * 1_000)
         if let failure = textConverter.replaceBeforeBoundary(
             original: ctx.pair.original, insert: edit.text, deleteCount: ctx.keys.count,
             switchesLayout: edit.switchesLayout, key: trigger, app: app,
             layoutID: candidate.layoutID, deadline: deadline, post: post
         ) {
-            finish(failure.rawValue, reason: failure.message)
+            finish(failure.rawValue, reason: failure.message, timings: " decision-ms=\(decisionMs)")
             return
         }
+        let editMs = Int((ProcessInfo.processInfo.systemUptime - decisionTime) * 1_000)
+        var timings = " decision-ms=\(decisionMs) edit-ms=\(editMs)"
 
         lastEditorFailure = nil
         keyboardMonitor.markConverted()
         lastAutoConverted = nil
         switch action {
         case .convert(let core, _):
-            switchAfterAutoCorrection()
+            let selectionStart = ProcessInfo.processInfo.systemUptime
+            let selection = switchAfterAutoCorrection()
+            let selectionMs = Int((ProcessInfo.processInfo.systemUptime - selectionStart) * 1_000)
+            timings += " layout=\(selection.rawValue) layout-ms=\(selectionMs)"
             DispatchQueue.main.async { [weak self] in self?.updateStatusIcon() }
             if trigger == .space { lastAutoConverted = (String(ctx.pair.original.prefix(core)), Date()) }
         case .fix(_, .typo), .fix(_, .number):
@@ -772,7 +785,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         default:
             break
         }
-        finish("events-posted")
+        finish("events-posted", timings: timings)
     }
 
     /// Конверсия раскладки по решению конвейера (бывшее тело handleAutoConvert после plan).
@@ -1010,20 +1023,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func switchAfterAutoCorrection() {
+    private enum LayoutSelection: String {
+        case confirmed, pending, failed
+    }
+
+    @discardableResult
+    private func switchAfterAutoCorrection() -> LayoutSelection {
         // Account for any intervening system switch whose notification is queued.
         playLayoutTransition(to: LayoutSwitcher.currentLayoutID())
         let target = LayoutSwitcher.switchToOpposite()
         let actual = LayoutSwitcher.currentLayoutID()
         playLayoutTransition(to: actual, corrected: target == actual)
+        guard let target else { return .failed }
+        return target == actual ? .confirmed : .pending
     }
 
     private func playLayoutTransition(to id: String, corrected: Bool = false) {
         guard layoutSoundTransition.update(id) else { return }
-        let settings = SettingsManager.shared
-        guard settings.keySound else { return }
-        let sound = LayoutSound(savedValue: settings.layoutSounds(including: id)[id])
-        sound.play(twice: corrected && settings.doubleAutoLayoutSound)
+        // Audio I/O must not delay returning the original key from the event tap.
+        DispatchQueue.main.async {
+            let settings = SettingsManager.shared
+            guard settings.keySound else { return }
+            let sound = LayoutSound(savedValue: settings.layoutSounds(including: id)[id])
+            sound.play(twice: corrected && settings.doubleAutoLayoutSound)
+        }
     }
 
     /// Собирает меню статус-бара. Вызывается заново при смене языка интерфейса,
@@ -1330,15 +1353,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// issue #10: создаёт/освобождает индикатор каретки по флагу настроек. Создаётся лениво,
     /// только когда фича включена И мониторинг запущен (нужны разрешения).
     private func syncCaretIndicator() {
-        keyboardMonitor.caretFlagEnabled = SettingsManager.shared.caretFlag   // гейт диспатча onUserInput
-        if SettingsManager.shared.caretFlag, monitoringActive {
+        let settings = SettingsManager.shared
+        keyboardMonitor.caretFlagEnabled = settings.caretFlag || settings.caretTools
+        if keyboardMonitor.caretFlagEnabled, monitoringActive {
             if caretIndicator == nil {
-                caretIndicator = CaretIndicator()
+                let indicator = CaretIndicator()
+                indicator.canCorrect = { [weak self] in self?.keyboardMonitor.caretWord() != nil }
+                indicator.onCorrect = { [weak self] in self?.correctAndRememberCaretWord() }
+                caretIndicator = indicator
+                keyboardMonitor.caretControlHitTest = { [weak indicator] in
+                    MainActor.assumeIsolated { indicator?.hitCorrectionButton() == true }
+                }
             }
+            caretIndicator?.configure(persistent: settings.caretTools)
         } else {
+            keyboardMonitor.caretControlHitTest = nil
             caretIndicator?.teardown()
             caretIndicator = nil
         }
+    }
+
+    private func correctAndRememberCaretWord() {
+        guard SettingsManager.shared.caretTools,
+              let (candidate, spaces) = keyboardMonitor.caretWord(),
+              let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier == candidate.pid,
+              !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
+              !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier),
+              LayoutSwitcher.currentLayoutID() == candidate.layoutID, LayoutSwitcher.currentSourceIsKeyboardLayout(),
+              let pair = DynamicKeyMapping.convertKeys(candidate.keys), pair.original != pair.converted,
+              pair.converted.allSatisfy(\.isLetter),
+              !AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) else { return }
+
+        let tail = String(repeating: " ", count: spaces)
+        let word = pair.converted.lowercased()
+        let pid = app.processIdentifier
+        let failure = textConverter.replaceBeforeBoundary(
+            original: pair.original + tail, insert: pair.converted + tail,
+            deleteCount: candidate.keys.count + spaces, switchesLayout: true,
+            key: nil, app: app, layoutID: candidate.layoutID,
+            deadline: ProcessInfo.processInfo.systemUptime + 0.12,
+            onVerified: { [weak self] in
+                guard let self else { return }
+                let settings = SettingsManager.shared
+                if !settings.alwaysConvertWordsSet.contains(word) {
+                    settings.alwaysConvertWords.append(word)
+                    self.settingsController.reloadExceptionLists()
+                }
+                self.caretIndicator?.indicateRememberedWord()
+                rslog("caret correction: verified and remembered")
+            },
+            post: { $0.postToPid(pid) }
+        )
+        if let failure {
+            rslog("caret correction: skipped \(failure.rawValue)")
+            return
+        }
+        keyboardMonitor.markConverted()
+        lastAutoConverted = nil
+        switchAfterAutoCorrection()
+        updateStatusIcon()
     }
 
     // MARK: - Actions

@@ -56,6 +56,7 @@ final class SettingsManager: @unchecked Sendable {
         static let doubleAutoLayoutSound = "com.antonjas.normalswitcher.doubleAutoLayoutSound"
         static let migratedLayoutSounds = "com.antonjas.normalswitcher.migratedLayoutSounds"
         static let layoutSound = "com.antonjas.normalswitcher.layoutSound"
+        static let caretTools = "com.ruswitcher.caretTools"
         static let caretFlag = "com.ruswitcher.caretFlag"
         static let secureInputNotice = "com.ruswitcher.secureInputNotice"
         static let hideMenuBarIcon = "com.ruswitcher.hideMenuBarIcon"
@@ -392,6 +393,11 @@ final class SettingsManager: @unchecked Sendable {
     var frequencyPacksChecked: Date? {
         get { defaults.object(forKey: Keys.frequencyPacksChecked) as? Date }
         set { defaults.set(newValue, forKey: Keys.frequencyPacksChecked) }
+    }
+
+    var caretTools: Bool {
+        get { defaults.bool(forKey: Keys.caretTools) }
+        set { defaults.set(newValue, forKey: Keys.caretTools) }
     }
 
     var caretFlag: Bool {

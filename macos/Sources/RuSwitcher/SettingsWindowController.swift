@@ -484,6 +484,9 @@ final class SettingsWindowController {
             check(L10n.menuMonoIcon, s.monochromeIcon, #selector(monochromeIconChanged(_:))),
             check(L10n.settingsCaretFlag, s.caretFlag, #selector(caretFlagChanged(_:))),
             hint(L10n.settingsCaretFlagHint),
+            check(taskText("Keep layout and correction controls at the caret (beta)",
+                           "Показывать плашку с исправлением у курсора (бета)"),
+                  s.caretTools, #selector(caretToolsChanged(_:))),
         ])
         let manual = SettingsDisclosure(title: L10n.settingsGroupManual, views: [
             check(L10n.settingsSmartConversion, s.smartConversion, #selector(smartConversionChanged(_:))),
@@ -962,6 +965,11 @@ final class SettingsWindowController {
         let enabled = sender.state == .on
         SettingsManager.shared.caretFlag = enabled
         onCaretFlagChanged?(enabled)
+    }
+
+    @objc private func caretToolsChanged(_ sender: NSButton) {
+        SettingsManager.shared.caretTools = sender.state == .on
+        onCaretFlagChanged?(SettingsManager.shared.caretFlag)
     }
 
     @objc private func betaChannelChanged(_ sender: NSButton) {
