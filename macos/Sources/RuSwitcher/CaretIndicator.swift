@@ -183,9 +183,7 @@ final class CaretIndicator: NSObject {
                 }
                 pointerAnchor = nil
             } else {
-                let hasEditor: Bool
-                if case .editorWithoutCaret = caret { hasEditor = true } else { hasEditor = false }
-                guard positionAtPointerAnchor(app: app, refresh: hasEditor || layoutChanged || correctionButton.isEnabled) else {
+                guard positionAtPointerAnchor(app: app, refresh: layoutChanged || correctionButton.isEnabled) else {
                     hide()
                     return
                 }
@@ -219,19 +217,27 @@ final class CaretIndicator: NSObject {
         let now = ProcessInfo.processInfo.systemUptime
         let pid = app.processIdentifier
         if pointerAnchor?.pid != pid || (pointerAnchor?.expires ?? 0) <= now { pointerAnchor = nil }
-        if refresh {
-            // Pin the fallback where it first appeared so the button stays clickable.
-            if pointerAnchor == nil {
-                rslog("layout-indicator: persistent pointer fallback app=\(app.bundleIdentifier ?? "unknown")")
-            }
-            let point = pointerAnchor?.point ?? NSEvent.mouseLocation
-            pointerAnchor = (pid, point, now + showDuration)
-        }
-        guard let anchor = pointerAnchor, anchor.expires > now else {
+        guard refresh || pointerAnchor != nil,
+              let window = focusedWindowFrame(pid: pid) else {
             pointerAnchor = nil
             return false
         }
-        return positionBesidePointer(anchor.point)
+        // Pin the fallback so the button stays clickable, even when the mouse moves.
+        let pointer = pointerAnchor?.point ?? NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }),
+              let origin = Self.persistentPointerOrigin(for: pointer, size: panel.frame.size,
+                                                       visible: window.intersection(screen.visibleFrame)) else {
+            pointerAnchor = nil
+            return false
+        }
+        if refresh {
+            if pointerAnchor == nil {
+                rslog("layout-indicator: persistent pointer fallback app=\(app.bundleIdentifier ?? "unknown")")
+            }
+            pointerAnchor = (pid, pointer, now + showDuration)
+        }
+        if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
+        return true
     }
 
     static func aboveCaretOrigin(_ caret: CGRect, size: CGSize, visible: CGRect) -> CGPoint? {
@@ -312,6 +318,21 @@ final class CaretIndicator: NSObject {
                        y: min(max(y, visible.minY), visible.maxY - size.height))
     }
 
+    static func persistentPointerOrigin(for pointer: CGPoint, size: CGSize, visible: CGRect) -> CGPoint? {
+        let inset = visible.insetBy(dx: 8, dy: 8)
+        guard visible.contains(pointer), !inset.isEmpty, size.width <= inset.width,
+              size.height <= inset.height else { return nil }
+        let gap: CGFloat = 12
+        let left = pointer.x - size.width - gap
+        let preferredX = left >= inset.minX ? left : pointer.x + gap
+        let x = min(max(preferredX, inset.minX), inset.maxX - size.width)
+        let above = max(pointer.y + gap, inset.minY)
+        if above + size.height <= inset.maxY { return CGPoint(x: x, y: above) }
+        let below = min(pointer.y - gap - size.height, inset.maxY - size.height)
+        guard below >= inset.minY else { return nil }
+        return CGPoint(x: x, y: below)
+    }
+
     private func positionBesidePointer(_ pointer: CGPoint) -> Bool {
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }),
               let point = Self.pointerOrigin(for: pointer, size: panel.frame.size, visible: screen.visibleFrame) else {
@@ -387,7 +408,23 @@ final class CaretIndicator: NSObject {
         return .known(r, rtl: rtl)
     }
 
+    private func focusedWindowFrame(pid: pid_t) -> NSRect? {
+        guard AXIsProcessTrusted() else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.006)
+        guard let window = elementAttribute(app, kAXFocusedWindowAttribute) else { return nil }
+        AXUIElementSetMessagingTimeout(window, 0.006)
+        return accessibilityFrame(of: window)
+    }
+
     private func editorAnchor(in element: AXUIElement) -> NSRect? {
+        guard let frame = accessibilityFrame(of: element),
+              frame.width >= 20, (8...400).contains(frame.height) else { return nil }
+        // Use the field's leading edge when its exact insertion point is missing.
+        return NSRect(x: frame.minX + 12, y: frame.minY, width: 0, height: frame.height)
+    }
+
+    private func accessibilityFrame(of element: AXUIElement) -> NSRect? {
         func frameValue(_ key: String) -> AXValue? {
             var raw: CFTypeRef?
             guard AXUIElementCopyAttributeValue(element, key as CFString, &raw) == .success,
@@ -399,11 +436,10 @@ final class CaretIndicator: NSObject {
         var size = CGSize.zero
         guard let pointValue = frameValue(kAXPositionAttribute), AXValueGetValue(pointValue, .cgPoint, &position),
               let sizeValue = frameValue(kAXSizeAttribute), AXValueGetValue(sizeValue, .cgSize, &size),
-              size.width >= 20, (8...400).contains(size.height),
-              let primary = NSScreen.screens.first else { return nil }
-        // Use the field's leading edge when its exact insertion point is missing.
-        return NSRect(x: position.x + 12, y: primary.frame.height - position.y - size.height,
-                      width: 0, height: size.height)
+              position.x.isFinite, position.y.isFinite, size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0, let primary = NSScreen.screens.first else { return nil }
+        return NSRect(x: position.x, y: primary.frame.height - position.y - size.height,
+                      width: size.width, height: size.height)
     }
 
     private func isEditableField(_ element: AXUIElement) -> Bool {
@@ -451,8 +487,12 @@ final class CaretIndicator: NSObject {
     }
 
     private func focusedElement(_ owner: AXUIElement) -> AXUIElement? {
+        elementAttribute(owner, kAXFocusedUIElementAttribute)
+    }
+
+    private func elementAttribute(_ owner: AXUIElement, _ key: String) -> AXUIElement? {
         var raw: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(owner, kAXFocusedUIElementAttribute as CFString, &raw) == .success,
+        guard AXUIElementCopyAttributeValue(owner, key as CFString, &raw) == .success,
               let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
         return (raw as! AXUIElement)
     }

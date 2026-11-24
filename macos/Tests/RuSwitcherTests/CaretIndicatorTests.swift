@@ -57,4 +57,16 @@ struct CaretIndicatorTests {
         #expect(CaretIndicator.pointerOrigin(for: CGPoint(x: -2, y: 43), size: size, visible: screen)
                 == CGPoint(x: -43, y: 40))
     }
+
+    @Test func persistentPointerFallbackStaysInsideTheAppWindow() {
+        let visibleWindow = CGRect(x: 100, y: 200, width: 500, height: 300)
+        let size = CGSize(width: 54, height: 21)
+        let nearSendButton = CGPoint(x: 546, y: 208)
+        #expect(CaretIndicator.persistentPointerOrigin(for: nearSendButton, size: size, visible: visibleWindow)
+                == CGPoint(x: 480, y: 220))
+        #expect(CaretIndicator.persistentPointerOrigin(for: CGPoint(x: 598, y: 497), size: size, visible: visibleWindow)
+                == CGPoint(x: 532, y: 464))
+        #expect(CaretIndicator.persistentPointerOrigin(for: CGPoint(x: 546, y: 199), size: size, visible: visibleWindow) == nil)
+        #expect(CaretIndicator.persistentPointerOrigin(for: nearSendButton, size: size, visible: .null) == nil)
+    }
 }
