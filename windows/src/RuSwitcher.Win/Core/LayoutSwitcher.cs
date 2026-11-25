@@ -70,12 +70,23 @@ internal static class LayoutSwitcher
             ? preferred : installed.ElementAtOrDefault(first ? 0 : 1);
     }
 
+    private static (IntPtr Window, IntPtr Layout, long Expires)? _automaticSwitch;
+
+    internal static bool ConsumeAutomaticSwitch(IntPtr layout)
+    {
+        var requested = _automaticSwitch;
+        _automaticSwitch = null;
+        return requested is { } expected && expected.Expires >= Environment.TickCount64
+            && expected.Layout == layout && expected.Window == GetForegroundWindow();
+    }
+
     /// <summary>Switch the focused window to <paramref name="hkl"/>.</summary>
     public static void SwitchTo(IntPtr hkl) => SwitchTo(hkl, GetForegroundWindow());
 
-    internal static void SwitchTo(IntPtr hkl, IntPtr hwnd)
+    internal static void SwitchTo(IntPtr hkl, IntPtr hwnd, bool automatic = false)
     {
-        if (hwnd != IntPtr.Zero)
-            PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl);
+        _automaticSwitch = null;
+        if (hwnd != IntPtr.Zero && PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl) != IntPtr.Zero && automatic)
+            _automaticSwitch = (hwnd, hkl, Environment.TickCount64 + 800);
     }
 }

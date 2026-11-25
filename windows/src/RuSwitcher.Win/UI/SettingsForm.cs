@@ -214,12 +214,14 @@ internal sealed class SettingsForm : Form
         var checkAccess = new Button { Text = L10n.T("settings.access.check"), AutoSize = true };
         checkAccess.Click += (_, _) => MessageBox.Show(this,
             L10n.T(keyboardHookReady ? "settings.access.ready" : "settings.access.failed"), Text);
-        AddPage("advanced",
+        AddPage("indicators",
             Check("settings.tray.hide", s.HideTrayIcon, value => SetAppearance(() => s.HideTrayIcon = value)),
             Check("settings.tray.mono", s.MonochromeTray, value => SetAppearance(() => s.MonochromeTray = value)),
             Check("settings.tray.caret", s.CaretIndicator, value => SetAppearance(() => s.CaretIndicator = value)),
             Check("settings.caretCorrection", s.CaretCorrection, value => SetAppearance(() => s.CaretCorrection = value)),
             Check("settings.rememberCaret", s.RememberCaretCorrections, value => { s.RememberCaretCorrections = value; s.Save(); }),
+            Check("settings.doubleAutoSound", s.DoubleAutoLayoutSound, value => { s.DoubleAutoLayoutSound = value; s.Save(); }));
+        AddPage("advanced",
             Check("settings.wholeline", s.ConvertWholeLine, value => { s.ConvertWholeLine = value; s.Save(); }),
             Check("settings.smart", s.SmartConversion, value => { s.SmartConversion = value; s.Save(); }),
             Check("settings.byText", s.ConvertByText, value => { s.ConvertByText = value; s.Save(); }),

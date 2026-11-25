@@ -38,6 +38,7 @@ public sealed class Settings
     /// <summary>issue #7: play a sound when the layout switches. Default off.</summary>
     public bool SoundOnSwitch { get; set; } = false;
     public string LayoutSound { get; set; } = Sound.Default;
+    public bool DoubleAutoLayoutSound { get; set; }
     public Dictionary<long, string> LayoutSounds { get; set; } = new();
 
     /// <summary>issue #14: a separate hotkey that only switches the layout (no conversion).

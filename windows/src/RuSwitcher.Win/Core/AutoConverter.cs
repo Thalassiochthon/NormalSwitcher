@@ -120,7 +120,7 @@ internal static class AutoConverter
 
             if (!preserveLayout)
             {
-                if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout);
+                if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout, input.Foreground, automatic: true);
                 Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, input.Layout, learn);
             }
             return true;

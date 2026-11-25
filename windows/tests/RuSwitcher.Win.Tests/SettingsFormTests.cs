@@ -80,7 +80,7 @@ public class SettingsFormTests
 
     private static void CheckPages(SettingsForm form, bool expectFit)
     {
-        foreach (string section in new[] { "general", "hotkeys", "automatic", "clipboard", "advanced", "about" })
+        foreach (string section in new[] { "general", "hotkeys", "automatic", "clipboard", "indicators", "advanced", "about" })
         {
             string title = L10n.T("settings.tab." + section);
             Button tab = Descendants(form).OfType<Button>().Single(button => button.Text == title);
