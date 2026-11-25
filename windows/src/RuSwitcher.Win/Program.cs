@@ -16,11 +16,15 @@ internal static class Program
     private static void Main(string[] args)
     {
         if (Updater.RunHelper(args)) return;
+        bool logon = args is [AutoStart.LogonArgument];
         using var instance = new Mutex(true, @"Local\NormalSwitcher.Windows", out bool firstInstance);
         if (!firstInstance)
         {
-            IntPtr window = FindWindowW(TrayIcon.WindowClass, "NormalSwitcher");
-            if (window != IntPtr.Zero) PostMessageW(window, WM_SETTINGS, IntPtr.Zero, IntPtr.Zero);
+            if (!logon)
+            {
+                IntPtr window = FindWindowW(TrayIcon.WindowClass, "NormalSwitcher");
+                if (window != IntPtr.Zero) PostMessageW(window, WM_SETTINGS, IntPtr.Zero, IntPtr.Zero);
+            }
             return;
         }
 
@@ -28,12 +32,15 @@ internal static class Program
 
         string logDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NormalSwitcher");
-        Directory.CreateDirectory(logDir);
         string logPath = Path.Combine(logDir, "debug.log");
         void Log(string line)
         {
             if (!Settings.Current.DebugLogging) return;
-            try { File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}"); }
+            try
+            {
+                Directory.CreateDirectory(logDir);
+                File.AppendAllText(logPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} {line}{Environment.NewLine}");
+            }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
@@ -45,7 +52,8 @@ internal static class Program
         { try { Log("THREAD-EX: " + e.Exception); } catch { /* ignore */ } };
 
         var settings = Settings.Current;
-        AutoStart.RepairMissingExecutable();
+        Log($"start: source={(logon ? "logon" : "manual")} pid={Environment.ProcessId}");
+        if (!logon) AutoStart.RepairMissingExecutable();
         var buffer = new KeystrokeBuffer();
         bool enabled = settings.KeyboardEnabled;
         long inputGeneration = 0;
@@ -363,12 +371,29 @@ internal static class Program
             switchDetector.OnKeyUp(vk);
             if (tray.Shortcuts.HasPending) tray.PostShortcutPoll();
         };
-        try { hook.Install(); keyboardHookReady = true; }
-        catch (InvalidOperationException error)
+        using var hookRetry = new System.Windows.Forms.Timer { Interval = 1500 };
+        int remainingHookRetries = 4;
+        void InstallHook()
         {
-            hook.Dispose();
-            Log(error.Message);
+            try
+            {
+                hook.Install();
+                keyboardHookReady = true;
+            }
+            catch (InvalidOperationException error)
+            {
+                hook.Dispose();
+                Log($"start: keyboard hook failed ({error.Message})");
+            }
         }
+        hookRetry.Tick += (_, _) =>
+        {
+            InstallHook();
+            if (keyboardHookReady || --remainingHookRetries == 0) hookRetry.Stop();
+            if (keyboardHookReady) Log("start: keyboard hook recovered");
+        };
+        InstallHook();
+        if (!keyboardHookReady) hookRetry.Start();
 
         // Per-app layout memory (issue): restores each app's last-used layout on focus. Off by default.
         using var appTracker = new AppLayoutTracker();

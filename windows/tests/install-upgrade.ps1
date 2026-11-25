@@ -143,6 +143,14 @@ try {
     }
 
     Write-Host 'Update prompt, download, installer handoff, restart and settings preservation verified.'
+    $startupLaunch = Start-Process -FilePath $exe -ArgumentList '--startup' -PassThru
+    if (-not $startupLaunch.WaitForExit(10000) -or $startupLaunch.ExitCode -ne 0) {
+        throw 'A redundant logon instance did not exit'
+    }
+    if ([NormalSwitcherSmoke]::FindWindowByTitle([IntPtr]::Zero, 'NormalSwitcher — Settings') -ne [IntPtr]::Zero) {
+        throw 'A redundant logon instance opened Settings'
+    }
+    Write-Host 'Redundant logon launch exited quietly.'
     $secondLaunch = Start-Process -FilePath $exe -PassThru
     if (-not $secondLaunch.WaitForExit(10000)) { throw 'A second instance did not exit' }
     $settingsWindow = Wait-ForWindow $null 'NormalSwitcher — Settings'

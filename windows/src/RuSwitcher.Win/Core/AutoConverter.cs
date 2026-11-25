@@ -29,7 +29,11 @@ internal static class AutoConverter
 
         IntPtr sourceHkl = KeyMapper.TextLayout(keys, input.Layout);
         string typed = KeyMapper.ConvertWord(keys, sourceHkl);
-        if (typed.Length != keys.Count) return false;
+        if (typed.Length != keys.Count)
+        {
+            diagnostic?.Invoke("key-mapping-incomplete");
+            return false;
+        }
         string srcTag = SmartConvert.LangTag(sourceHkl);
         bool caps = keys.All(k => k.Caps);
 
@@ -61,7 +65,11 @@ internal static class AutoConverter
                     (before, after) => ShouldConvertPure(before, after, srcTag, targetTag, caps, Dict.Available,
                         Dict.CheckWord, settings.NeverConvert, settings.AlwaysConvert, CheckTarget));
                 if (plan == null) continue;
-                if (converted != null) return false; // More than one plausible destination.
+                if (converted != null)
+                {
+                    diagnostic?.Invoke("multiple-correction-targets");
+                    return false;
+                }
                 targetHkl = layout;
                 converted = settings.FixTwoCaps && !caps
                     ? TextFixes.TwoCaps(plan, word => CheckTarget(word, targetTag) == true) ?? plan
@@ -82,6 +90,8 @@ internal static class AutoConverter
         if (settings.FixTypos && TextFixes.Typo(keys, typed, key => KeyMapper.TranslateIn(key, sourceHkl),
                 word => CheckTarget(word, srcTag), word => CheckTarget(word, srcTag) == true) is { } typo)
             return await Replace(typo, sourceHkl, learn: true);
+        diagnostic?.Invoke(targets.Length == 0 && settings.AutoConvert
+            ? "no-layout-target" : "no-confident-correction");
         return false;
 
         bool? CheckTarget(string word, string tag) =>

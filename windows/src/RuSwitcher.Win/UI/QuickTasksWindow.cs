@@ -5,7 +5,7 @@ namespace RuSwitcher.Win.UI;
 
 internal sealed class QuickTasksWindow : Form
 {
-    private readonly QuickTaskStore _store = new(Path.Combine(Settings.DataDirectory, "tasks.dat"));
+    private readonly QuickTaskStore _store;
     private readonly ListBox _list = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly TextBox _search = new() { Dock = DockStyle.Top, PlaceholderText = L10n.T("clipboard.search") };
     private readonly CheckBox _done = new() { Text = L10n.T("tasks.completed"), AutoSize = true, Dock = DockStyle.Top };
@@ -19,8 +19,9 @@ internal sealed class QuickTasksWindow : Form
     private bool _editing;
     private Form? _notice;
 
-    public QuickTasksWindow()
+    public QuickTasksWindow(QuickTaskStore? store = null)
     {
+        _store = store ?? new QuickTaskStore(Path.Combine(Settings.DataDirectory, "tasks.dat"));
         Text = L10n.T("tasks.title");
         FormBorderStyle = FormBorderStyle.FixedToolWindow;
         StartPosition = FormStartPosition.CenterScreen;
@@ -29,9 +30,12 @@ internal sealed class QuickTasksWindow : Form
         ClientSize = new Size(480, 350);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true };
         var create = MakeButton("tasks.new");
+        create.Name = "NewTask";
         var reload = MakeButton("clipboard.retry");
-        actions.Controls.AddRange([create, _edit, _toggle, _delete, _undo, reload]);
-        Controls.AddRange([_list, _done, _search, actions, _status]);
+        var createRow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
+        createRow.Controls.Add(create);
+        actions.Controls.AddRange([_edit, _toggle, _delete, _undo, reload]);
+        Controls.AddRange([_list, _done, _search, createRow, actions, _status]);
         _list.DisplayMember = nameof(QuickTask.Title);
         _search.PlaceholderText = L10n.T("tasks.search");
         _search.TextChanged += (_, _) => RefreshList();
@@ -170,12 +174,12 @@ internal sealed class QuickTasksWindow : Form
         {
             using var editor = new Form
             {
-                Text = L10n.T(original == null ? "tasks.new" : "tasks.edit"),
+                Name = "TaskEditor", Text = L10n.T(original == null ? "tasks.new" : "tasks.edit"),
                 FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent,
                 ClientSize = new Size(450, 310), MinimizeBox = false, MaximizeBox = false,
                 AutoScaleMode = AutoScaleMode.Dpi, AutoScaleDimensions = new SizeF(96, 96), ShowInTaskbar = false
             };
-            var title = new TextBox { Dock = DockStyle.Top, Text = original?.Title ?? "", PlaceholderText = L10n.T("tasks.name") };
+            var title = new TextBox { Name = "TaskTitle", Dock = DockStyle.Top, Text = original?.Title ?? "", PlaceholderText = L10n.T("tasks.name") };
             var text = new TextBox { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical,
                 Text = original?.Text ?? "", MaxLength = ClipboardHistoryStore.MaxEntryLength };
             var save = MakeButton("tasks.save");
@@ -186,13 +190,19 @@ internal sealed class QuickTasksWindow : Form
             editor.Controls.AddRange([text, title, row]);
             editor.AcceptButton = save;
             editor.CancelButton = close;
+            editor.Shown += (_, _) => title.Focus();
+            title.AccessibleName = L10n.T("tasks.name");
             bool saved = false;
             save.Click += (_, _) =>
             {
                 var draft = new QuickTask(original?.Id ?? Guid.NewGuid(), title.Text.Trim(), text.Text, false);
                 if (!QuickTaskStore.Valid(draft))
                 {
-                    MessageBox.Show(editor, L10n.T("tasks.invalid"));
+                    string reason = draft.Title.Length == 0 ? L10n.T("tasks.nameRequired")
+                        : draft.TitleLength > QuickTask.MaxTitleLength
+                            ? L10n.T("tasks.nameTooLong", QuickTask.MaxTitleLength)
+                            : L10n.T("tasks.textTooLong");
+                    MessageBox.Show(editor, reason, editor.Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 if (!Change(items =>

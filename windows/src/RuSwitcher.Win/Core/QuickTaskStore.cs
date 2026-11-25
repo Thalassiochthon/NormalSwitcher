@@ -6,12 +6,16 @@ namespace RuSwitcher.Win.Core;
 
 internal sealed record QuickTask(Guid Id, string Title, string Text, bool Completed)
 {
+    internal const int MaxTitleLength = 120;
+    internal int TitleLength => new StringInfo(Title).LengthInTextElements;
+
     public static QuickTask FromText(string text)
     {
         string title = text.ReplaceLineEndings("\n").Split('\n')
             .Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0) ?? "";
         var elements = new StringInfo(title);
-        if (elements.LengthInTextElements > 120) title = elements.SubstringByTextElements(0, 120);
+        if (elements.LengthInTextElements > MaxTitleLength)
+            title = elements.SubstringByTextElements(0, MaxTitleLength);
         return new(Guid.NewGuid(), title, text, false);
     }
 }
@@ -45,7 +49,7 @@ internal sealed class QuickTaskStore(string path)
     }
 
     internal static bool Valid(QuickTask task) => task.Id != Guid.Empty &&
-        !string.IsNullOrWhiteSpace(task.Title) && new StringInfo(task.Title).LengthInTextElements <= 120 &&
+        !string.IsNullOrWhiteSpace(task.Title) && task.TitleLength <= QuickTask.MaxTitleLength &&
         task.Text is { Length: <= ClipboardHistoryStore.MaxEntryLength };
 
     public QuickTask[] Change(Func<QuickTask[], QuickTask[]> change)

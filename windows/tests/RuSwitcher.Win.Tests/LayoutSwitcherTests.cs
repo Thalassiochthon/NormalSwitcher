@@ -34,4 +34,18 @@ public class LayoutSwitcherTests
         var russian = new IntPtr(0x0419);
         Assert.Null(LayoutSwitcher.NextInstalled(russian, [russian]));
     }
+
+    [Fact]
+    public void AutomaticCorrectionConsidersSpanishAndPreservesAnExplicitPair()
+    {
+        IntPtr russian = new(0x0419), english = new(0x0409), spanish = new(0x0C0A);
+        IntPtr[] installed = [russian, english, spanish];
+        Assert.Equal(new[] { english, spanish },
+            LayoutSwitcher.ConversionTargets(russian, installed, russian, IntPtr.Zero).ToArray());
+        Assert.Equal(new[] { russian, english },
+            LayoutSwitcher.ConversionTargets(spanish, installed, IntPtr.Zero, IntPtr.Zero).ToArray());
+        Assert.Equal(new[] { english },
+            LayoutSwitcher.ConversionTargets(russian, installed, russian, english).ToArray());
+        Assert.Empty(LayoutSwitcher.ConversionTargets(spanish, installed, russian, english));
+    }
 }

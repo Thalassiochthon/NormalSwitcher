@@ -101,7 +101,11 @@ internal static class Program
     private static int CheckAccessibleEditor()
     {
         var text = new System.Windows.Controls.TextBox();
-        var window = new System.Windows.Window { Title = "NormalSwitcher UI Automation test", Topmost = true, Content = text };
+        var document = new System.Windows.Controls.RichTextBox { Height = 120 };
+        var panel = new System.Windows.Controls.StackPanel();
+        panel.Children.Add(text);
+        panel.Children.Add(document);
+        var window = new System.Windows.Window { Title = "NormalSwitcher UI Automation test", Topmost = true, Content = panel };
         int result = 1;
         window.ContentRendered += async (_, _) =>
         {
@@ -115,6 +119,15 @@ internal static class Program
                 Tap(0x20);
                 await Until(() => text.Text == "NormalSwitcher ", "Space expansion through UI Automation");
                 Console.WriteLine("UI Automation verified the text in a WPF editor.");
+                document.Focus();
+                await Until(() => document.IsKeyboardFocused, "WPF document focus");
+                TypeShortcutWord();
+                string DocumentText() => new System.Windows.Documents.TextRange(
+                    document.Document.ContentStart, document.Document.ContentEnd).Text;
+                await Until(() => DocumentText() == "zz\r\n", "word in a WPF document");
+                Tap(0x20);
+                await Until(() => DocumentText() == "NormalSwitcher \r\n", "Space expansion in a WPF document");
+                Console.WriteLine("UI Automation verified the text in a WPF document.");
                 result = 0;
             }
             catch (Exception error) { Console.Error.WriteLine(error); }

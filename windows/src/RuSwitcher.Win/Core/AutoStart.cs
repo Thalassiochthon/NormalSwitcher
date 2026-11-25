@@ -8,6 +8,7 @@ internal static class AutoStart
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "NormalSwitcher";
+    internal const string LogonArgument = "--startup";
 
     public static bool IsEnabled()
     {
@@ -26,12 +27,23 @@ internal static class AutoStart
             using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
             if (key?.GetValue(ValueName) is string command && !File.Exists(ExecutablePath(command))
                 && Environment.ProcessPath is { } executable)
-                key.SetValue(ValueName, $"\"{executable}\"");
+            {
+                string replacement = CommandFor(executable);
+                if (replacement.Length <= 260) key.SetValue(ValueName, replacement);
+            }
         }
         catch { /* Registry may be managed by Windows policy. */ }
     }
 
-    private static string ExecutablePath(string command) => command.Trim().Trim('"');
+    internal static string CommandFor(string executable) => $"\"{executable}\" {LogonArgument}";
+
+    internal static string ExecutablePath(string command)
+    {
+        string trimmed = command.Trim();
+        if (!trimmed.StartsWith('"')) return trimmed;
+        int endQuote = trimmed.IndexOf('"', 1);
+        return endQuote > 0 ? trimmed[1..endQuote] : "";
+    }
 
     public static bool SetEnabled(bool on)
     {
@@ -44,13 +56,14 @@ internal static class AutoStart
             {
                 string? exe = Environment.ProcessPath;
                 if (string.IsNullOrEmpty(exe)) return false;
-                key.SetValue(ValueName, $"\"{exe}\"");
+                string command = CommandFor(exe);
+                // Run entries accept a command line of up to 260 characters.
+                if (command.Length > 260) return false;
+                key.SetValue(ValueName, command);
+                return Equals(key.GetValue(ValueName), command);
             }
-            else
-            {
-                key.DeleteValue(ValueName, throwOnMissingValue: false);
-            }
-            return true;
+            key.DeleteValue(ValueName, throwOnMissingValue: false);
+            return key.GetValue(ValueName) is null;
         }
         catch { return false; }
     }

@@ -26,6 +26,7 @@ internal sealed class TrayIcon : IDisposable
     private Icon? _icon;
     private CaretBadge? _badge;
     private bool _visible;
+    private long _nextTrayAttempt;
     private bool _monochrome;
     private IntPtr _shownLayout;
     private bool _menuOpen;
@@ -99,6 +100,8 @@ internal sealed class TrayIcon : IDisposable
         _layoutTimer.Tick += (_, _) =>
         {
             RefreshLayout();
+            if (!_visible && !Settings.Current.HideTrayIcon && Environment.TickCount64 >= _nextTrayAttempt)
+                AddTrayIcon();
             ClipboardHistory.Poll();
             Shortcuts.Poll();
         };
@@ -116,10 +119,11 @@ internal sealed class TrayIcon : IDisposable
     public void RefreshAppearance()
     {
         bool show = !Settings.Current.HideTrayIcon;
-        if (show != _visible)
+        if (show && !_visible) AddTrayIcon();
+        else if (!show && _visible)
         {
-            if (show) _visible = Shell_NotifyIconW(NIM_ADD, ref _nid);
-            else { Shell_NotifyIconW(NIM_DELETE, ref _nid); _visible = false; }
+            Shell_NotifyIconW(NIM_DELETE, ref _nid);
+            _visible = false;
         }
         if (!Settings.Current.CaretIndicator)
         {
@@ -127,6 +131,21 @@ internal sealed class TrayIcon : IDisposable
             _badge = null;
         }
         RefreshLayout();
+    }
+
+    private void AddTrayIcon()
+    {
+        _visible = Shell_NotifyIconW(NIM_ADD, ref _nid);
+        if (_visible)
+        {
+            if (_nextTrayAttempt != 0) Diagnostic?.Invoke("start: tray icon recovered");
+            _nextTrayAttempt = 0;
+        }
+        else
+        {
+            if (_nextTrayAttempt == 0) Diagnostic?.Invoke("start: tray icon unavailable; retrying");
+            _nextTrayAttempt = Environment.TickCount64 + 1000;
+        }
     }
 
     private void RefreshLayout()
@@ -142,10 +161,7 @@ internal sealed class TrayIcon : IDisposable
         data.hIcon = next.Handle;
         data.szTip = LayoutTooltip(layout);
         if (_visible && !Shell_NotifyIconW(NIM_MODIFY, ref data))
-        {
-            next.Dispose();
-            return;
-        }
+            _visible = false; // Explorer can disappear before TaskbarCreated arrives.
         _icon?.Dispose();
         _icon = next;
         _nid = data;

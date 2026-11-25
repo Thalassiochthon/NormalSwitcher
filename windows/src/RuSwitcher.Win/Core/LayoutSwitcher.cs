@@ -45,9 +45,11 @@ internal static class LayoutSwitcher
     internal static IEnumerable<IntPtr> ConversionTargets(IntPtr current)
     {
         var settings = Settings.Current;
-        var layouts = Installed();
-        var first = new IntPtr(settings.FirstLayout);
-        var second = new IntPtr(settings.SecondLayout);
+        return ConversionTargets(current, Installed(), new(settings.FirstLayout), new(settings.SecondLayout));
+    }
+
+    internal static IEnumerable<IntPtr> ConversionTargets(IntPtr current, IntPtr[] layouts, IntPtr first, IntPtr second)
+    {
         if (first != second && layouts.Contains(first) && layouts.Contains(second))
         {
             if (current == first) yield return second;
