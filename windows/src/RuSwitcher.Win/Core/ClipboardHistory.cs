@@ -19,6 +19,8 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
     private bool _registered;
     private bool _open;
     private bool _storageReady;
+    private Task? _saveInProgress;
+    private bool _saveRequested;
     public event Action? Pasted;
     public bool HasError { get; private set; }
 
@@ -50,7 +52,12 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         try
         {
             if (enabled && !RetryStorage(includeCurrent: true)) return false;
-            if (!enabled) _store.Clear();
+            if (!enabled)
+            {
+                FinishSave();
+                _store.Clear();
+                _saveRequested = false;
+            }
             _storageReady = enabled;
             if (!enabled) _pending.Clear();
             HasError = false;
@@ -109,6 +116,8 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
 
     public void Poll()
     {
+        if (_saveInProgress?.IsCompleted == true) FinishSave();
+        StartSave();
         if (!Settings.Current.ClipboardHistoryEnabled) return;
         uint sequence = GetClipboardSequenceNumber();
         if (sequence == 0 || sequence == _sequence) return;
@@ -122,11 +131,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             if (Settings.Current.ClipboardHistoryPersistent)
             {
                 Insert(_pending, entry);
-                if (_storageReady && !HasError)
-                {
-                    try { _store.Write(_items); _pending.Clear(); }
-                    catch { HasError = true; }
-                }
+                RequestSave();
             }
         }
         catch (ExternalException) { /* The clipboard owner may still have it open. Retry on the next tick. */ }
@@ -155,11 +160,37 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             entries.Clear();
             entries.AddRange(next);
         }
-        if (settings.ClipboardHistoryPersistent && _storageReady && !HasError)
+        if (settings.ClipboardHistoryPersistent) RequestSave();
+    }
+
+    private void RequestSave()
+    {
+        _saveRequested = true;
+        StartSave();
+    }
+
+    private void StartSave()
+    {
+        if (!_saveRequested || _saveInProgress is not null || !_storageReady || HasError) return;
+        var snapshot = _items.ToArray();
+        _saveRequested = false;
+        _saveInProgress = Task.Run(() => _store.Write(snapshot));
+    }
+
+    private void FinishSave()
+    {
+        if (_saveInProgress is not { } save) return;
+        try
         {
-            try { _store.Write(_items); }
-            catch { HasError = true; }
+            save.GetAwaiter().GetResult();
+            if (!_saveRequested) _pending.Clear();
         }
+        catch (Exception error)
+        {
+            HasError = true;
+            log($"Clipboard history save failed: {error.GetType().Name}");
+        }
+        finally { _saveInProgress = null; }
     }
 
     private static ClipboardEntry? ReadAllowedEntry()
@@ -297,6 +328,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
     {
         try
         {
+            FinishSave();
             ClipboardEntry[] saved;
             try { saved = _store.Read(Settings.Current.ClipboardImageLimit); }
             catch (FileNotFoundException) { saved = []; }
@@ -305,6 +337,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             var merged = ClipboardEntry.Trim(_pending.Concat(includeCurrent ? _items : []).Concat(saved),
                 Settings.Current.ClipboardImageLimit);
             _store.Write(merged);
+            _saveRequested = false;
             _items.Clear();
             _items.AddRange(merged);
             _pending.Clear();
@@ -317,8 +350,11 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
 
     private bool Clear()
     {
+        // Wait for an active write before deleting so history cannot reappear after clearing.
+        FinishSave();
         try { _store.Clear(); }
         catch { HasError = true; return false; }
+        _saveRequested = false;
         _items.Clear();
         _pending.Clear();
         SkipCurrent();
@@ -327,5 +363,11 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         return true;
     }
 
-    public void Dispose() => Unregister();
+    public void Dispose()
+    {
+        Unregister();
+        FinishSave();
+        StartSave();
+        FinishSave();
+    }
 }

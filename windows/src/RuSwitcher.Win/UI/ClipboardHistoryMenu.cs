@@ -82,7 +82,7 @@ internal sealed class ClipboardHistoryMenu : Form
                 : entries.Where(entry => (entry.Text ?? LabelFor(entry))
                     .Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
             list.Items.Clear();
-            foreach (string entry in visible)
+            foreach (var entry in visible)
             {
                 string label = LabelFor(entry);
                 list.Items.Add(label.Length > 120 ? label[..120] + "…" : label);
