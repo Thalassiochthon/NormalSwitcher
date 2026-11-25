@@ -47,6 +47,9 @@ internal sealed class TrayIcon : IDisposable
     public event Action? TriggerActivated;
     /// <summary>Fired on the message-loop thread when an as-you-type auto-convert was posted from the hook.</summary>
     public event Action? AutoConvertActivated;
+    public event Action? CaretCorrectionRequested;
+    public Func<InputTarget, bool>? CanCorrectCaret { get; set; }
+    public bool CaretButtonHit => _badge?.ButtonHit == true;
 
     public TrayIcon() => _wndProc = WindowProc;
 
@@ -100,6 +103,13 @@ internal sealed class TrayIcon : IDisposable
         _layoutTimer.Tick += (_, _) =>
         {
             RefreshLayout();
+            if (Settings.Current.CaretCorrection)
+            {
+                if (InputTarget.Capture() is { IsPasswordEdit: false } target && target.Foreground != _hwnd
+                    && Form.ActiveForm is null)
+                    Badge().ShowAtCaret(target.Layout, persistent: true, canCorrect: CanCorrectCaret?.Invoke(target) == true);
+                else _badge?.Hide();
+            }
             if (!_visible && !Settings.Current.HideTrayIcon && Environment.TickCount64 >= _nextTrayAttempt)
                 AddTrayIcon();
             ClipboardHistory.Poll();
@@ -125,11 +135,8 @@ internal sealed class TrayIcon : IDisposable
             Shell_NotifyIconW(NIM_DELETE, ref _nid);
             _visible = false;
         }
-        if (!Settings.Current.CaretIndicator)
-        {
-            _badge?.Dispose();
-            _badge = null;
-        }
+        _badge?.Dispose();
+        _badge = null;
         RefreshLayout();
     }
 
@@ -168,8 +175,16 @@ internal sealed class TrayIcon : IDisposable
         _shownLayout = layout;
         _monochrome = monochrome;
         if (changed) Sound.Switch(layout);
-        if (changed && Settings.Current.CaretIndicator)
-            (_badge ??= new CaretBadge()).ShowAtCaret(layout);
+        if (changed && Settings.Current.CaretIndicator && !Settings.Current.CaretCorrection)
+            Badge().ShowAtCaret(layout);
+    }
+
+    private CaretBadge Badge()
+    {
+        if (_badge is not null) return _badge;
+        _badge = new CaretBadge();
+        _badge.Correct += () => CaretCorrectionRequested?.Invoke();
+        return _badge;
     }
 
     internal static string TriggerName(TriggerKind t) => t switch

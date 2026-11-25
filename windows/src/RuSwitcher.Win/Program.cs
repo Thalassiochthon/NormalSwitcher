@@ -58,6 +58,7 @@ internal static class Program
         bool enabled = settings.KeyboardEnabled;
         long inputGeneration = 0;
         InputTarget? wordTarget = null, undoTarget = null;
+        (InputTarget Target, TypedKey[] Keys, int Spaces)? wordAtBoundary = null;
         (InputTarget Target, string Text, int NextVariant)? caseCycle = null;
         (List<TypedKey> Keys, InputTarget Target, long Generation, uint DeferredKey, List<TypedKey> Tail)? pendingAuto = null;
         (InputTarget Target, long Generation)? pendingTrigger = null;
@@ -70,6 +71,7 @@ internal static class Program
             pendingTrigger = null;
             buffer.Reset();
             wordTarget = null;
+            wordAtBoundary = null;
             caseCycle = null;
             Converter.ClearReconvert();
         }
@@ -172,7 +174,10 @@ internal static class Program
                         deferred ? "" : " " + tail, preserveLayout: tail.Length > 0,
                         diagnostic: settings.DebugLogging ? reason =>
                             Log($"auto: app={AppLayoutTracker.ProcessName(word.Target.Foreground) ?? "unknown"} result={reason}") : null))
+                {
                     undoTarget = word.Target;
+                    wordAtBoundary = null;
+                }
             }
             finally
             {
@@ -305,7 +310,32 @@ internal static class Program
         tray.UpdateRequested += () => Updater.CheckNow(ui);
 
         using var hook = new KeyboardHook();
-        hook.MousePressed += () => { tray.Shortcuts.CancelPending(); ResetInput(); };
+        tray.CanCorrectCaret = target => enabled && (wordTarget == target && !buffer.IsEmpty
+            || wordAtBoundary is { } saved && saved.Target == target);
+        tray.CaretCorrectionRequested += async () =>
+        {
+            if (!settings.CaretCorrection || InputTarget.Capture() is not { } target
+                || tray.CanCorrectCaret?.Invoke(target) != true) return;
+            var candidate = wordTarget == target && !buffer.IsEmpty
+                ? (Keys: buffer.CurrentWord.ToArray(), Spaces: 0)
+                : (wordAtBoundary!.Value.Keys, wordAtBoundary.Value.Spaces);
+            long generation = ++inputGeneration;
+            pendingAuto = null;
+            if (await Converter.CorrectCaretWordAsync(candidate.Keys, candidate.Spaces, target,
+                    () => settings.CaretCorrection && CanEdit(target, generation, checkLayout: true),
+                    settings.RememberCaretCorrections))
+            {
+                buffer.Reset();
+                wordAtBoundary = null;
+                undoTarget = target;
+            }
+        };
+        hook.MousePressed += () =>
+        {
+            if (tray.CaretButtonHit) return;
+            tray.Shortcuts.CancelPending();
+            ResetInput();
+        };
         hook.KeyDown = (vk, sc) =>
         {
             if (!enabled) return false;
@@ -353,6 +383,7 @@ internal static class Program
                 bool shift = IsDown(VK_SHIFT);
                 bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
                 var typed = new TypedKey(vk, sc, shift, caps, packet);
+                wordAtBoundary = null;
                 buffer.Append(typed);
                 if (pendingAuto == null && previousWord is { DeferredKey: 0 } pending &&
                     pending.Target == target && pending.Tail.Count < 32 && !shift && !caps)
@@ -361,7 +392,18 @@ internal static class Program
                     pendingAuto = (pending.Keys, pending.Target, inputGeneration, 0, pending.Tail);
                 }
             }
-            else buffer.Reset();
+            else
+            {
+                if (settings.CaretCorrection && vk == KeystrokeBuffer.VK_SPACE && !IsDown(VK_SHIFT))
+                {
+                    if (!buffer.IsEmpty) wordAtBoundary = (target, buffer.CurrentWord.ToArray(), 1);
+                    else if (wordAtBoundary is { Spaces: < 3 } saved && saved.Target == target)
+                        wordAtBoundary = (target, saved.Keys, saved.Spaces + 1);
+                    else wordAtBoundary = null;
+                }
+                else wordAtBoundary = null;
+                buffer.Reset();
+            }
             return deferredKey != 0;
         };
         hook.KeyUp += (vk, sc) =>

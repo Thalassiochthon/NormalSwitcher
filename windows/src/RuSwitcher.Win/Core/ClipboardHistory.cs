@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using RuSwitcher.Win.UI;
@@ -7,13 +8,13 @@ namespace RuSwitcher.Win.Core;
 
 public enum ClipboardShortcut { CtrlShiftV, AltShiftV, CtrlAltV }
 
-/// <summary>Tracks text copied explicitly by the user. All clipboard access runs on the STA UI thread.</summary>
+/// <summary>Tracks text and images copied explicitly by the user. All clipboard access runs on the STA UI thread.</summary>
 internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDisposable
 {
     private const int HotkeyId = 1;
     private readonly ClipboardHistoryStore _store = new(Path.Combine(Settings.DataDirectory, "clipboard-history.dat"));
-    private readonly List<string> _items = [];
-    private readonly List<string> _pending = [];
+    private readonly List<ClipboardEntry> _items = [];
+    private readonly List<ClipboardEntry> _pending = [];
     private uint _sequence = GetClipboardSequenceNumber();
     private bool _registered;
     private bool _open;
@@ -113,18 +114,14 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
         if (sequence == 0 || sequence == _sequence) return;
         try
         {
-            string? text = ReadAllowedText();
+            var entry = ReadAllowedEntry();
             if (GetClipboardSequenceNumber() != sequence) return;
             _sequence = sequence;
-            if (!ClipboardHistoryStore.IsValid(text) || _items.FirstOrDefault() == text) return;
-            _items.Remove(text!);
-            _items.Insert(0, text!);
-            if (_items.Count > ClipboardHistoryStore.Limit) _items.RemoveAt(_items.Count - 1);
+            if (entry is null || _items.FirstOrDefault()?.Key == entry.Key) return;
+            Insert(_items, entry);
             if (Settings.Current.ClipboardHistoryPersistent)
             {
-                _pending.Remove(text!);
-                _pending.Insert(0, text!);
-                if (_pending.Count > ClipboardHistoryStore.Limit) _pending.RemoveAt(_pending.Count - 1);
+                Insert(_pending, entry);
                 if (_storageReady && !HasError)
                 {
                     try { _store.Write(_items); _pending.Clear(); }
@@ -133,9 +130,71 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             }
         }
         catch (ExternalException) { /* The clipboard owner may still have it open. Retry on the next tick. */ }
+        catch (Exception error) when (error is ArgumentException or OutOfMemoryException)
+        {
+            _sequence = sequence;
+            log("Clipboard image unavailable");
+        }
     }
 
-    internal static string? ReadAllowedText()
+    private static void Insert(List<ClipboardEntry> entries, ClipboardEntry entry)
+    {
+        var next = ClipboardEntry.Trim(entries.Prepend(entry), Settings.Current.ClipboardImageLimit);
+        entries.Clear();
+        entries.AddRange(next);
+    }
+
+    public void SetImageLimit(int limit)
+    {
+        var settings = Settings.Current;
+        settings.ClipboardImageLimit = Math.Clamp(limit, 0, 50);
+        settings.Save();
+        foreach (var entries in new[] { _items, _pending })
+        {
+            var next = ClipboardEntry.Trim(entries, settings.ClipboardImageLimit);
+            entries.Clear();
+            entries.AddRange(next);
+        }
+        if (settings.ClipboardHistoryPersistent && _storageReady && !HasError)
+        {
+            try { _store.Write(_items); }
+            catch { HasError = true; }
+        }
+    }
+
+    private static ClipboardEntry? ReadAllowedEntry()
+    {
+        var data = AllowedClipboardData();
+        if (data == null) return null;
+        if (Settings.Current.ClipboardImageLimit > 0)
+        {
+            if (data.GetDataPresent("PNG", false) && data.GetData("PNG", false) is MemoryStream png)
+            {
+                using (png)
+                {
+                    if (png.Length <= ClipboardEntry.MaxImageBytes)
+                    {
+                        png.Position = 0;
+                        using var original = Image.FromStream(png);
+                        if (ClipboardEntry.FromImage(original) is { } entry) return entry;
+                    }
+                }
+            }
+            if (data.GetDataPresent(DataFormats.Bitmap))
+            {
+                using var image = data.GetData(DataFormats.Bitmap) as Image;
+                if (image is not null && ClipboardEntry.FromImage(image) is { } entry) return entry;
+            }
+        }
+        return ReadText(data) is { } text && ClipboardHistoryStore.IsValid(text) ? new ClipboardEntry(text) : null;
+    }
+
+    internal static string? ReadAllowedText() => AllowedClipboardData() is { } data ? ReadText(data) : null;
+
+    private static string? ReadText(IDataObject data) => data.GetDataPresent(DataFormats.UnicodeText, false)
+        ? data.GetData(DataFormats.UnicodeText, false) as string : null;
+
+    private static IDataObject? AllowedClipboardData()
     {
         var data = Clipboard.GetDataObject();
         return data != null
@@ -144,9 +203,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             && !Disallows(data, "CanIncludeInClipboardHistory")
             && !Disallows(data, "CanUploadToCloudClipboard")
             && !data.GetDataPresent("Clipboard Viewer Ignore", false)
-            && InputTarget.Capture() is not { IsPasswordEdit: true }
-            && data.GetDataPresent(DataFormats.UnicodeText, false)
-            ? data.GetData(DataFormats.UnicodeText, false) as string : null;
+            && InputTarget.Capture() is not { IsPasswordEdit: true } ? data : null;
     }
 
     private static bool Disallows(IDataObject data, string format)
@@ -196,7 +253,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
             _ = PasteAsync(selected, expected);
     }
 
-    private async Task PasteAsync(string text, InputTarget expected)
+    private async Task PasteAsync(ClipboardEntry entry, InputTarget expected)
     {
         // Activation of another process may complete after the menu closes.
         if (InputTarget.Capture() is not { } current || !expected.SameControl(current))
@@ -210,7 +267,17 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
 
         try
         {
-            Clipboard.SetText(text, TextDataFormat.UnicodeText);
+            if (entry.Text is { } text) Clipboard.SetText(text, TextDataFormat.UnicodeText);
+            else
+            {
+                using var bitmap = entry.OpenImage();
+                if (bitmap is null) return;
+                using var png = new MemoryStream(entry.Png!, writable: false);
+                var data = new DataObject();
+                data.SetImage(bitmap);
+                data.SetData("PNG", false, png);
+                Clipboard.SetDataObject(data, copy: true);
+            }
             SkipCurrent();
             Pasted?.Invoke();
             TextInjector.SendCtrl(VK_V);
@@ -220,7 +287,7 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
 
     private void Load()
     {
-        try { _items.AddRange(_store.Read()); _storageReady = true; }
+        try { _items.AddRange(_store.Read(Settings.Current.ClipboardImageLimit)); _storageReady = true; }
         catch (FileNotFoundException) { _storageReady = true; }
         catch (DirectoryNotFoundException) { _storageReady = true; }
         catch { HasError = true; }
@@ -230,13 +297,13 @@ internal sealed class ClipboardHistory(IntPtr window, Action<string> log) : IDis
     {
         try
         {
-            string[] saved;
-            try { saved = _store.Read(); }
+            ClipboardEntry[] saved;
+            try { saved = _store.Read(Settings.Current.ClipboardImageLimit); }
             catch (FileNotFoundException) { saved = []; }
             catch (DirectoryNotFoundException) { saved = []; }
 
-            var merged = _pending.Concat(includeCurrent ? _items : []).Concat(saved)
-                .Distinct().Take(ClipboardHistoryStore.Limit).ToArray();
+            var merged = ClipboardEntry.Trim(_pending.Concat(includeCurrent ? _items : []).Concat(saved),
+                Settings.Current.ClipboardImageLimit);
             _store.Write(merged);
             _items.Clear();
             _items.AddRange(merged);

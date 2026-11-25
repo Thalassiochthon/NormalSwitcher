@@ -193,7 +193,11 @@ internal sealed class SettingsForm : Form
         };
         var tasks = new Button { Text = L10n.T("tasks.title"), AutoSize = true };
         tasks.Click += (_, _) => { openTasks?.Invoke(); Close(); };
-        AddPage("clipboard", enabled, shortcut, persist, tasks,
+        var imageLimit = new NumericUpDown { Minimum = 0, Maximum = 50, Value = Math.Clamp(s.ClipboardImageLimit, 0, 50), Width = 70 };
+        imageLimit.ValueChanged += (_, _) => history.SetImageLimit((int)imageLimit.Value);
+        var images = new FlowLayoutPanel { AutoSize = true };
+        images.Controls.AddRange([new Label { Text = L10n.T("clipboard.imageLimit"), AutoSize = true }, imageLimit]);
+        AddPage("clipboard", enabled, shortcut, persist, images, tasks,
             Shortcut(ShortcutAction.OpenTasks), Shortcut(ShortcutAction.CaptureTask),
             Hint("clipboard.hint"));
 
@@ -214,6 +218,8 @@ internal sealed class SettingsForm : Form
             Check("settings.tray.hide", s.HideTrayIcon, value => SetAppearance(() => s.HideTrayIcon = value)),
             Check("settings.tray.mono", s.MonochromeTray, value => SetAppearance(() => s.MonochromeTray = value)),
             Check("settings.tray.caret", s.CaretIndicator, value => SetAppearance(() => s.CaretIndicator = value)),
+            Check("settings.caretCorrection", s.CaretCorrection, value => SetAppearance(() => s.CaretCorrection = value)),
+            Check("settings.rememberCaret", s.RememberCaretCorrections, value => { s.RememberCaretCorrections = value; s.Save(); }),
             Check("settings.wholeline", s.ConvertWholeLine, value => { s.ConvertWholeLine = value; s.Save(); }),
             Check("settings.smart", s.SmartConversion, value => { s.SmartConversion = value; s.Save(); }),
             Check("settings.byText", s.ConvertByText, value => { s.ConvertByText = value; s.Save(); }),

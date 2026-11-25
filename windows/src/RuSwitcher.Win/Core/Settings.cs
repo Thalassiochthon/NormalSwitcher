@@ -106,6 +106,11 @@ public sealed class Settings
     public bool ReceiveBetaUpdates { get; set; }
     public bool ClipboardHistoryEnabled { get; set; }
     public bool ClipboardHistoryPersistent { get; set; }
+    public int ClipboardImageLimit { get; set; } = 10;
+    public int ClipboardWindowWidth { get; set; } = 540;
+    public int ClipboardWindowHeight { get; set; } = 405;
+    public bool CaretCorrection { get; set; }
+    public bool RememberCaretCorrections { get; set; } = true;
     public ClipboardShortcut ClipboardHistoryShortcut { get; set; }
     public KeyChord? ClipboardCustomShortcut { get; set; }
 

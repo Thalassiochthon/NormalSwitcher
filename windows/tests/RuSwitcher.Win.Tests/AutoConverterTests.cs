@@ -124,6 +124,16 @@ public class AutoConverterTests
     }
 
     [Fact]
+    public void ArrowLearnedWordOverridesTheDictionaryAndKeepsCorrectSpelling()
+    {
+        var always = new List<string> { "лабуба", "kf,e,f" };
+        Assert.True(AutoConverter.ShouldConvertPure("kf,e,f", "лабуба", "en-US", "ru-RU",
+            false, false, Dict(), None, new List<string> { "лабуба" }));
+        Assert.False(AutoConverter.ShouldConvertPure("Лабуба", "Kf,e,f", "ru-RU", "en-US",
+            false, false, Dict(), None, always));
+    }
+
+    [Fact]
     public void Never_list_blocks_a_would_be_conversion()
     {
         var never = new List<string> { "ghbdtn" };

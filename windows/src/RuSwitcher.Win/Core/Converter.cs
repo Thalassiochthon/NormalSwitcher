@@ -84,6 +84,35 @@ internal static class Converter
         return true;
     }
 
+    internal static async Task<bool> CorrectCaretWordAsync(IReadOnlyList<TypedKey> keys, int spaces,
+        InputTarget target, Func<bool> stillCurrent, bool remember)
+    {
+        if (keys.Count is 0 or > 64 || !stillCurrent()
+            || LayoutSwitcher.CorrectionTarget(target.Layout) is not { } next) return false;
+        var settings = Settings.Current;
+        if ((settings.ExcludedApps.Count > 0 || settings.RemoteDesktopMode)
+            && AppLayoutTracker.ProcessName(target.Foreground) is { } app
+            && (settings.ExcludedApps.Contains(app, StringComparer.OrdinalIgnoreCase)
+                || (settings.RemoteDesktopMode && app is "mstsc" or "msrdc"))) return false;
+        string original = KeyMapper.ConvertWord(keys, target.Layout);
+        string corrected = KeyMapper.ConvertWord(keys, target.Layout, next);
+        if (original.Length != keys.Count || corrected.Length != keys.Count
+            || original == corrected || !corrected.All(char.IsLetter)
+            || settings.NeverConvert.Contains(original.ToLowerInvariant())
+            || settings.NeverConvert.Contains(corrected.ToLowerInvariant())) return false;
+        string boundary = new(' ', spaces);
+        if (!await target.MatchesTextAtCaretAsync(original + boundary) || !stillCurrent()
+            || !TextInjector.Replace(original.Length + spaces, corrected + boundary)) return false;
+        if (remember && !settings.AlwaysConvert.Contains(corrected, StringComparer.OrdinalIgnoreCase))
+        {
+            settings.AlwaysConvert.Add(corrected.ToLowerInvariant());
+            settings.Save();
+        }
+        LayoutSwitcher.SwitchTo(next, target.Foreground);
+        NoteAutoConversion(corrected + boundary, original + boundary, next, target.Layout, learn: false);
+        return true;
+    }
+
     /// <summary>Reverse the last conversion (and toggle for a repeated trigger).</summary>
     public static bool Reconvert()
     {

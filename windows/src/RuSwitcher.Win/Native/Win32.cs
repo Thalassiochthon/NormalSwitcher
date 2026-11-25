@@ -378,4 +378,11 @@ internal static class Win32
 
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WindowRect { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(IntPtr window, out WindowRect rect);
 }

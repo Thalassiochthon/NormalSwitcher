@@ -153,6 +153,7 @@ internal static class AutoConverter
 
         // Explicit overrides (checked before the soft vetoes).
         if (never.Contains(typedLc) || never.Contains(convertedLc)) return false;
+        if (always.Contains(typedLc)) return false;
         if (always.Contains(convertedLc)) return true;
 
         // --- soft vetoes (cheap, before the dictionary) ---
