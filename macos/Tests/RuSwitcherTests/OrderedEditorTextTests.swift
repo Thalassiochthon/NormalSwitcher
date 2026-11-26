@@ -3,6 +3,15 @@ import Testing
 @testable import RuSwitcher
 
 struct OrderedEditorTextTests {
+    @Test func translationInputTrimsShortTextAndRejectsOversizedSelections() {
+        #expect(TextConverter.shortTranslationInput("  buenos días\n") == "buenos días")
+        #expect(TextConverter.shortTranslationInput(" \t ") == nil)
+        #expect(TextConverter.shortTranslationInput(nil) == nil)
+        #expect(TextConverter.shortTranslationInput(String(repeating: "🙂", count: 280))?.count == 280)
+        #expect(TextConverter.shortTranslationInput(String(repeating: "a", count: 281)) == nil)
+        #expect(TextConverter.shortTranslationInput(String(repeating: "🙂", count: 281)) == nil)
+    }
+
     @Test func caretRangeUsesUTF16Offsets() {
         let text = "🙂 ghbdtn"
         #expect(TextConverter.textInRange(text, range: CFRange(location: 3, length: 6)) == "ghbdtn")

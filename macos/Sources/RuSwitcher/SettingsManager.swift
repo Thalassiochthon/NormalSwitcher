@@ -56,6 +56,7 @@ final class SettingsManager: @unchecked Sendable {
         static let doubleAutoLayoutSound = "com.antonjas.normalswitcher.doubleAutoLayoutSound"
         static let migratedLayoutSounds = "com.antonjas.normalswitcher.migratedLayoutSounds"
         static let layoutSound = "com.antonjas.normalswitcher.layoutSound"
+        static let caretTranslation = "com.ruswitcher.caretTranslation"
         static let caretTools = "com.ruswitcher.caretTools"
         static let caretLearnsCorrections = "com.ruswitcher.caretLearnsCorrections"
         static let caretFlag = "com.ruswitcher.caretFlag"
@@ -399,6 +400,11 @@ final class SettingsManager: @unchecked Sendable {
     var caretTools: Bool {
         get { defaults.bool(forKey: Keys.caretTools) }
         set { defaults.set(newValue, forKey: Keys.caretTools) }
+    }
+
+    var caretTranslation: Bool {
+        get { defaults.bool(forKey: Keys.caretTranslation) }
+        set { defaults.set(newValue, forKey: Keys.caretTranslation) }
     }
 
     var caretLearnsCorrections: Bool {

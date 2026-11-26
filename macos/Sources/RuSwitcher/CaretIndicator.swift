@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import SwiftUI
 
 /// Shows the input source briefly on a switch, or keeps the correction controls at the caret.
 /// The panel never takes focus.
@@ -9,7 +10,7 @@ private final class CaretPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private final class CaretCorrectionButton: NSButton {
+private final class CaretControlButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
@@ -18,6 +19,11 @@ final class CaretIndicator: NSObject {
     private let panel: NSPanel
     private let label: NSTextField
     private let correctionButton: NSButton
+    private let translationButton: NSButton
+    private var showsTranslation = false
+    private var translationPopover: NSPopover?
+    private var translationOwner: pid_t?
+    var translationInput: () -> String? = { nil }
     private var refreshTimer: Timer?
     private var persistent = false
     var canCorrect: () -> Bool = { false }
@@ -65,7 +71,8 @@ final class CaretIndicator: NSObject {
         label.isBezeled = false
         label.isEditable = false
         label.drawsBackground = false
-        correctionButton = CaretCorrectionButton(frame: .zero)
+        correctionButton = CaretControlButton(frame: .zero)
+        translationButton = CaretControlButton(frame: .zero)
         super.init()
         correctionButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
         correctionButton.isBordered = false
@@ -73,7 +80,14 @@ final class CaretIndicator: NSObject {
         correctionButton.action = #selector(correctLastWord)
         correctionButton.isHidden = true
         correctionButton.widthAnchor.constraint(equalToConstant: 21).isActive = true
-        let row = NSStackView(views: [label, correctionButton])
+        translationButton.title = "文A"
+        translationButton.font = .systemFont(ofSize: 10, weight: .semibold)
+        translationButton.isBordered = false
+        translationButton.target = self
+        translationButton.action = #selector(translate)
+        translationButton.isHidden = true
+        translationButton.widthAnchor.constraint(equalToConstant: 25).isActive = true
+        let row = NSStackView(views: [label, correctionButton, translationButton])
         row.orientation = .horizontal
         row.spacing = 2
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -85,13 +99,23 @@ final class CaretIndicator: NSObject {
         ])
     }
 
-    func configure(persistent enabled: Bool, learnsCorrections: Bool) {
+    func configure(persistent enabled: Bool, learnsCorrections: Bool, showsTranslation: Bool = false) {
         let title = learnsCorrections
             ? taskText("Correct and remember the last word", "Исправить и запомнить последнее слово")
             : taskText("Correct the last word", "Исправить последнее слово")
         correctionButton.toolTip = title
         correctionButton.setAccessibilityLabel(title)
-        guard enabled != persistent else { return }
+        let translateTitle = taskText("Translate the selection or last word", "Перевести выделение или последнее слово")
+        translationButton.toolTip = translateTitle
+        translationButton.setAccessibilityLabel(translateTitle)
+        if #available(macOS 15.0, *) {
+            self.showsTranslation = enabled && showsTranslation
+        }
+        if !self.showsTranslation { closeTranslation() }
+        guard enabled != persistent else {
+            if enabled { showAtCaret() }
+            return
+        }
         persistent = enabled
         pointerAnchor = nil
         refreshTimer?.invalidate()
@@ -106,16 +130,43 @@ final class CaretIndicator: NSObject {
         showAtCaret()
     }
 
-    func hitCorrectionButton() -> Bool {
-        guard persistent, visible, correctionButton.isEnabled else { return false }
-        return panel.convertToScreen(correctionButton.convert(correctionButton.bounds, to: nil))
-            .contains(NSEvent.mouseLocation)
+    func hitControl() -> Bool {
+        guard persistent, visible else { return false }
+        return [correctionButton, translationButton].contains { button in
+            !button.isHidden && button.isEnabled
+                && panel.convertToScreen(button.convert(button.bounds, to: nil)).contains(NSEvent.mouseLocation)
+        }
+    }
+
+    @objc private func translate() {
+        guard #available(macOS 15.0, *), showsTranslation, visible,
+              !AutoSwitchPolicy.secureInputActive,
+              let owner = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
+        if translationPopover?.isShown == true {
+            closeTranslation()
+            return
+        }
+        let input = translationInput()
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == owner,
+              !AutoSwitchPolicy.secureInputActive else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: CaretTranslationView(text: input))
+        translationPopover = popover
+        translationOwner = owner
+        popover.show(relativeTo: translationButton.bounds, of: translationButton, preferredEdge: .maxY)
+    }
+
+    private func closeTranslation() {
+        translationPopover?.close()
+        translationPopover = nil
+        translationOwner = nil
     }
 
     @objc private func correctLastWord() {
         onCorrect()
         correctionButton.isEnabled = false
-        panel.ignoresMouseEvents = true
+        panel.ignoresMouseEvents = !showsTranslation
     }
 
     func indicateRememberedWord() {
@@ -139,6 +190,7 @@ final class CaretIndicator: NSObject {
 
     /// Фича выключена / выход — снять окно и таймер.
     func teardown() {
+        closeTranslation()
         refreshTimer?.invalidate()
         refreshTimer = nil
         hideTimer?.invalidate(); hideTimer = nil
@@ -151,6 +203,12 @@ final class CaretIndicator: NSObject {
     // MARK: - Internals
 
     private func showAtCaret(layoutChanged: Bool = false) {
+        if translationPopover?.isShown == true, !AutoSwitchPolicy.secureInputActive,
+           let front = NSWorkspace.shared.frontmostApplication,
+           front.processIdentifier == translationOwner || front.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            return
+        }
+        if translationPopover != nil { closeTranslation() }
         guard !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
               let app = NSWorkspace.shared.frontmostApplication,
               app.bundleIdentifier != Bundle.main.bundleIdentifier,
@@ -166,7 +224,9 @@ final class CaretIndicator: NSObject {
         correctionButton.isHidden = !persistent
         correctionButton.isEnabled = persistent && canCorrect()
         let labelWidth = min(130, max(18, ceil(label.intrinsicContentSize.width)))
-        let size = NSSize(width: labelWidth + (persistent ? 34 : 12), height: persistent ? 21 : 19)
+        translationButton.isHidden = !showsTranslation
+        let controlsWidth: CGFloat = (persistent ? 34 : 12) + (showsTranslation ? 27 : 0)
+        let size = NSSize(width: labelWidth + controlsWidth, height: persistent ? 21 : 19)
         if panel.frame.size != size { panel.setContentSize(size) }
         let caret = caretLocation(pid: app.processIdentifier)
         if case .protectedField = caret {
@@ -188,7 +248,7 @@ final class CaretIndicator: NSObject {
                     return
                 }
             }
-            panel.ignoresMouseEvents = !correctionButton.isEnabled
+            panel.ignoresMouseEvents = !correctionButton.isEnabled && !showsTranslation
             panel.alphaValue = panel.frame.contains(NSEvent.mouseLocation) ? 0.92 : 0.68
             if !panel.isVisible { panel.orderFrontRegardless() }
             visible = true

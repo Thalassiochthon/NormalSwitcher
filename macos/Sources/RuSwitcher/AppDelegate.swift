@@ -1362,19 +1362,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let indicator = CaretIndicator()
                 indicator.canCorrect = { [weak self] in self?.keyboardMonitor.caretWord() != nil }
                 indicator.resolvedEditor = { [weak self] in self?.textConverter.verifiedEditorForCaret(pid: $0) }
+                indicator.translationInput = { [weak self] in self?.caretTranslationInput() }
                 indicator.onCorrect = { [weak self] in self?.correctCaretWord() }
                 caretIndicator = indicator
                 keyboardMonitor.caretControlHitTest = { [weak indicator] in
-                    MainActor.assumeIsolated { indicator?.hitCorrectionButton() == true }
+                    MainActor.assumeIsolated { indicator?.hitControl() == true }
                 }
             }
             caretIndicator?.configure(persistent: settings.caretTools,
-                                      learnsCorrections: settings.caretLearnsCorrections)
+                                      learnsCorrections: settings.caretLearnsCorrections,
+                                      showsTranslation: settings.caretTranslation)
         } else {
             keyboardMonitor.caretControlHitTest = nil
             caretIndicator?.teardown()
             caretIndicator = nil
         }
+    }
+
+    private func caretTranslationInput() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
+              !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier),
+              app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
+
+        var typedSuffix: String?
+        if let (candidate, spaces) = keyboardMonitor.caretWord(),
+           candidate.pid == app.processIdentifier,
+           LayoutSwitcher.currentLayoutID() == candidate.layoutID,
+           LayoutSwitcher.currentSourceIsKeyboardLayout(),
+           let word = DynamicKeyMapping.lineString(from: candidate.keys) {
+            typedSuffix = word + String(repeating: " ", count: spaces)
+        }
+        return textConverter.translationInput(pid: app.processIdentifier, typedSuffix: typedSuffix)
     }
 
     private func correctCaretWord() {

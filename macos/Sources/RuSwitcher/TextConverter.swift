@@ -239,20 +239,7 @@ final class TextConverter {
 
         func readSuffix(_ range: CFRange) -> String? {
             guard hasTime(0.006) else { return nil }
-            var value = range
-            guard let parameter = AXValueCreate(.cfRange, &value) else { return nil }
-            var suffix: AnyObject?
-            let result = AXUIElementCopyParameterizedAttributeValue(
-                focus, kAXStringForRangeParameterizedAttribute as CFString, parameter, &suffix
-            )
-            if result == .success, let text = suffix as? String { return text }
-            let limit = 32_768
-            guard range.location <= limit - range.length, hasTime(0.012),
-                  let size = axAttribute(focus, kAXNumberOfCharactersAttribute as CFString) as? Int,
-                  (0...limit).contains(size), hasTime(0.006),
-                  let text = axAttribute(focus, kAXValueAttribute as CFString) as? String,
-                  text.utf16.count <= limit else { return nil }
-            return Self.textInRange(text, range: range)
+            return readEditorText(focus, range: range, deadline: deadline)
         }
 
         let initial = Self.readSettledSuffix(read: {
@@ -449,6 +436,26 @@ final class TextConverter {
         return element
     }
 
+    private func readEditorText(_ element: AXUIElement, range: CFRange, deadline: TimeInterval) -> String? {
+        func hasTime(_ reserve: TimeInterval) -> Bool {
+            ProcessInfo.processInfo.systemUptime + reserve < deadline
+        }
+        var value = range
+        guard let parameter = AXValueCreate(.cfRange, &value) else { return nil }
+        var suffix: AnyObject?
+        let result = AXUIElementCopyParameterizedAttributeValue(
+            element, kAXStringForRangeParameterizedAttribute as CFString, parameter, &suffix
+        )
+        if result == .success, let text = suffix as? String { return text }
+        let limit = 32_768
+        guard range.location <= limit - range.length, hasTime(0.012),
+              let size = axAttribute(element, kAXNumberOfCharactersAttribute as CFString) as? Int,
+              (0...limit).contains(size), hasTime(0.006),
+              let text = axAttribute(element, kAXValueAttribute as CFString) as? String,
+              text.utf16.count <= limit else { return nil }
+        return Self.textInRange(text, range: range)
+    }
+
     private func axAttribute(_ element: AXUIElement, _ attribute: CFString) -> AnyObject? {
         var raw: AnyObject?
         guard AXUIElementCopyAttributeValue(element, attribute, &raw) == .success else { return nil }
@@ -543,6 +550,53 @@ final class TextConverter {
         }
         prepareEditorContext(pid: pid, retryInterval: 1.5)
         return nil
+    }
+
+    /// Reads an explicit selection or verifies the tracked word against the current field.
+    /// Translation never synthesizes a selection or reads the clipboard.
+    func translationInput(pid: pid_t, typedSuffix: String?) -> String? {
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.12
+        guard !isConverting, !AutoSwitchPolicy.secureInputActive,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+              let focus = orderedFocus(pid: pid, deadline: deadline) else { return nil }
+        let element = focus.element
+        AXUIElementSetMessagingTimeout(element, 0.006)
+        guard axAttribute(element, kAXSubroleAttribute as CFString) as? String != (kAXSecureTextFieldSubrole as String),
+              let selection = Self.axRange(axAttribute(element, kAXSelectedTextRangeAttribute as CFString))
+                ?? (axAttribute(element, kAXSelectedTextRangesAttribute as CFString) as? [AnyObject])
+                    .flatMap({ $0.count == 1 ? Self.axRange($0[0]) : nil })
+        else { return nil }
+
+        func read(_ range: CFRange) -> String? {
+            guard range.length <= 560, ProcessInfo.processInfo.systemUptime + 0.006 < deadline else { return nil }
+            if selection.length > 0,
+               let selected = axAttribute(element, kAXSelectedTextAttribute as CFString) as? String {
+                return selected
+            }
+            return readEditorText(element, range: range, deadline: deadline)
+        }
+
+        let text: String?
+        if selection.length > 0 {
+            text = read(selection)
+        } else if let typedSuffix,
+                  case .success(let verified) = Self.verifyEditorSuffix(original: typedSuffix, caret: selection,
+                                                                         allowInitialCapital: true, readSuffix: read) {
+            text = verified.text
+        } else {
+            text = nil
+        }
+        guard let input = Self.shortTranslationInput(text),
+              !AutoSwitchPolicy.secureInputActive,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+              orderedFocusMatches(focus, pid: pid, deadline: deadline) else { return nil }
+        return input
+    }
+
+    nonisolated static func shortTranslationInput(_ text: String?) -> String? {
+        guard let text, text.utf16.count <= 560 else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed.count <= 280 ? trimmed : nil
     }
 
     private func orderedFocus(pid: pid_t, deadline: TimeInterval) -> OrderedFocus? {

@@ -478,7 +478,7 @@ final class SettingsWindowController {
 
     private func createAdvancedTab() -> NSView {
         let s = SettingsManager.shared
-        let appearance = SettingsDisclosure(title: L10n.settingsGroupAppearance, views: [
+        var appearanceViews: [NSView] = [
             check(L10n.settingsHideIcon, s.hideMenuBarIcon, #selector(hideIconChanged(_:))),
             hint(L10n.settingsHideIconHint),
             check(L10n.menuMonoIcon, s.monochromeIcon, #selector(monochromeIconChanged(_:))),
@@ -490,7 +490,13 @@ final class SettingsWindowController {
             check(taskText("Remember words corrected with the arrow",
                            "Запоминать слова после исправления стрелкой"),
                   s.caretLearnsCorrections, #selector(caretLearningChanged(_:))),
-        ])
+        ]
+        if #available(macOS 15.0, *) {
+            appearanceViews.append(check(taskText("Show Translate on the caret panel (beta)",
+                                                   "Показывать кнопку перевода на плашке у курсора (бета)"),
+                                         s.caretTranslation, #selector(caretTranslationChanged(_:))))
+        }
+        let appearance = SettingsDisclosure(title: L10n.settingsGroupAppearance, views: appearanceViews)
         let manual = SettingsDisclosure(title: L10n.settingsGroupManual, views: [
             check(L10n.settingsSmartConversion, s.smartConversion, #selector(smartConversionChanged(_:))),
             hint(L10n.settingsSmartConversionHint),
@@ -972,6 +978,11 @@ final class SettingsWindowController {
 
     @objc private func caretToolsChanged(_ sender: NSButton) {
         SettingsManager.shared.caretTools = sender.state == .on
+        onCaretFlagChanged?(SettingsManager.shared.caretFlag)
+    }
+
+    @objc private func caretTranslationChanged(_ sender: NSButton) {
+        SettingsManager.shared.caretTranslation = sender.state == .on
         onCaretFlagChanged?(SettingsManager.shared.caretFlag)
     }
 
