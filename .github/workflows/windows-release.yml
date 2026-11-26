@@ -2,13 +2,15 @@ name: windows-release
 
 # Builds, packages, (optionally) signs and publishes a Windows release.
 # Triggered by pushing a tag like `win-v0.9.0` (the Windows track is versioned separately from the
-# macOS `vX.Y.Z` tags). Publishing is therefore an explicit, human action: pushing the tag.
+# macOS `vX.Y.Z` tags). A `release/windows-beta-0.9.0-beta.1` branch can also publish a beta.
 #
 # Code signing is OPTIONAL and gated on a certificate secret being present (mirrors how the macOS
 # build only notarizes when credentials exist). Without a cert the release still ships, unsigned;
 # SmartScreen will warn until a cert is added (secrets WINDOWS_CERT_PFX_BASE64 + WINDOWS_CERT_PASSWORD).
 on:
   push:
+    branches:
+      - 'release/windows-beta-*'
     tags:
       - 'win-v*'
   workflow_dispatch:
@@ -42,8 +44,11 @@ jobs:
         run: |
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
             $v = $env:REQUESTED_VERSION
+          } elseif ($env:GITHUB_REF_TYPE -eq 'branch') {
+            $v = $env:GITHUB_REF_NAME -creplace '^release/windows-beta-', ''
+            if ($v -cnotmatch '-beta\.[1-9][0-9]*$') { throw 'A Windows beta branch must specify a beta version' }
           } else {
-            $v = '${{ github.ref_name }}' -replace '^win-v',''
+            $v = $env:GITHUB_REF_NAME -creplace '^win-v',''
           }
           if ($v -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$') { throw 'Invalid release version' }
           $beta = $v.Contains('-beta.')
