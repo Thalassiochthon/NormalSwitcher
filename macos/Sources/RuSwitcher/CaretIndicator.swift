@@ -251,11 +251,12 @@ final class CaretIndicator: NSObject {
             return
         }
         if translationPopover != nil { closeTranslation() }
+        let languageCode = LayoutSwitcher.currentLanguageCode()
         guard !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
               let app = NSWorkspace.shared.frontmostApplication,
               app.bundleIdentifier != Bundle.main.bundleIdentifier,
               !persistent || !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier),
-              let name = Self.badgeLabel(LayoutSwitcher.currentLanguageCode()) ?? LayoutSwitcher.currentInputSourceName() else {
+              let name = Self.badgeLabel(languageCode) ?? LayoutSwitcher.currentInputSourceName() else {
             pointerAnchor = nil
             hide()
             return
@@ -270,7 +271,8 @@ final class CaretIndicator: NSObject {
         let controlsWidth: CGFloat = (persistent ? 34 : 12) + (showsTranslation ? 27 : 0)
         let size = NSSize(width: labelWidth + controlsWidth, height: persistent ? 21 : 19)
         if panel.frame.size != size { panel.setContentSize(size) }
-        let caret = caretLocation(pid: app.processIdentifier)
+        let rtl = Locale.Language(identifier: languageCode ?? "und").characterDirection == .rightToLeft
+        let caret = caretLocation(pid: app.processIdentifier, fallbackRTL: rtl)
         if case .protectedField = caret {
             pointerAnchor = nil
             hide()
@@ -283,9 +285,9 @@ final class CaretIndicator: NSObject {
                       positionOutsideEditor(selection: bounds, editor: editor, pid: app.processIdentifier) {
                 pointerAnchor = nil
             } else if case .editorWithoutCaret(let frame?) = caret,
-                      positionOutsideEditor(selection: nil, editor: frame, pid: app.processIdentifier) {
+                      positionOutsideEditor(selection: nil, editor: frame, pid: app.processIdentifier, rtl: rtl) {
                 if !visible || pointerAnchor != nil {
-                    rslog("layout-indicator: editor edge app=\(app.bundleIdentifier ?? "unknown")")
+                    rslog("layout-indicator: editor trailing edge app=\(app.bundleIdentifier ?? "unknown")")
                 }
                 pointerAnchor = nil
             } else {
@@ -356,17 +358,29 @@ final class CaretIndicator: NSObject {
         return CGPoint(x: x.rounded(), y: y.rounded())
     }
 
-    static func outsideEditorOrigin(selection: CGRect?, editor: CGRect?, size: CGSize, visible: CGRect) -> CGPoint? {
+    static func outsideEditorOrigin(selection: CGRect?, editor: CGRect?, size: CGSize, visible: CGRect,
+                                    rtl: Bool = false) -> CGPoint? {
         guard let bounds = editor ?? selection, !visible.isNull,
               size.width <= visible.width, size.height <= visible.height,
               bounds.intersects(visible) else { return nil }
         let field = bounds.intersection(visible)
+        let gap: CGFloat = 8
+        if selection == nil {
+            let sideX = rtl ? field.minX - gap - size.width : field.maxX + gap
+            let alignedX = rtl ? field.minX : field.maxX - size.width
+            let x = min(max(alignedX, visible.minX), visible.maxX - size.width)
+            let y = min(max(field.midY - size.height / 2, visible.minY), visible.maxY - size.height)
+            // Field bounds alone give no insertion point. Use the trailing edge or clear the field vertically.
+            return [CGPoint(x: sideX, y: y),
+                    CGPoint(x: x, y: field.minY - gap - size.height),
+                    CGPoint(x: x, y: field.maxY + 40)]
+                .first { visible.contains(CGRect(origin: $0, size: size)) }
+        }
         let anchor = selection.flatMap { $0.intersects(field) ? $0.intersection(field) : nil }
         let reference = anchor.map { CGPoint(x: $0.midX, y: $0.midY) }
             ?? CGPoint(x: field.minX + min(12, field.width / 2), y: field.minY + min(12, field.height / 2))
         let x = min(max(reference.x - size.width / 2, visible.minX), visible.maxX - size.width)
         let y = min(max(reference.y - size.height / 2, visible.minY), visible.maxY - size.height)
-        let gap: CGFloat = 8
         let candidates = [
             CGPoint(x: field.maxX + gap, y: y),
             CGPoint(x: field.minX - gap - size.width, y: y),
@@ -384,13 +398,13 @@ final class CaretIndicator: NSObject {
         return visible.contains(CGRect(origin: above, size: size)) ? above : nil
     }
 
-    private func positionOutsideEditor(selection: CGRect?, editor: CGRect?, pid: pid_t) -> Bool {
+    private func positionOutsideEditor(selection: CGRect?, editor: CGRect?, pid: pid_t, rtl: Bool = false) -> Bool {
         guard let anchor = selection ?? editor else { return false }
         let window = focusedWindowFrame(pid: pid)
         for screen in NSScreen.screens where screen.frame.intersects(anchor) {
             let visible = window.map { $0.intersection(screen.visibleFrame) } ?? screen.visibleFrame
             if let origin = Self.outsideEditorOrigin(selection: selection, editor: editor,
-                                                      size: panel.frame.size, visible: visible) {
+                                                      size: panel.frame.size, visible: visible, rtl: rtl) {
                 if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
                 return true
             }
@@ -497,14 +511,14 @@ final class CaretIndicator: NSObject {
         case protectedField
     }
 
-    private func caretLocation(pid: pid_t) -> CaretLocation {
+    private func caretLocation(pid: pid_t, fallbackRTL: Bool) -> CaretLocation {
         guard AXIsProcessTrusted() else { return .unavailable }
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, persistent ? 0.012 : 0.025)
         let appFocus = focusedElement(axApp)
         var editorFallback: CaretLocation?
         func inspect(_ element: AXUIElement) -> CaretLocation? {
-            let location = caretLocation(in: element)
+            let location = caretLocation(in: element, fallbackRTL: fallbackRTL)
             switch location {
             case .unavailable: return nil
             case .editorWithoutCaret(let anchor):
@@ -525,7 +539,7 @@ final class CaretIndicator: NSObject {
         return editorFallback ?? .unavailable
     }
 
-    private func caretLocation(in element: AXUIElement) -> CaretLocation {
+    private func caretLocation(in element: AXUIElement, fallbackRTL: Bool) -> CaretLocation {
         AXUIElementSetMessagingTimeout(element, persistent ? 0.012 : 0.025)
         var subrole: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole) == .success,
@@ -548,14 +562,16 @@ final class CaretIndicator: NSObject {
            isEditableField(element), let selection = Self.appKitRect(marker) {
             return .selection(selection, editor: editorAnchor(in: element))
         }
-        guard let bounds = nativeCaret ?? marker.flatMap({ Self.isInsertionRect($0) ? $0 : nil }),
-              let rect = Self.appKitRect(bounds) else {
+        let exactCaret = nativeCaret ?? marker.flatMap { Self.isInsertionRect($0) ? $0 : nil }
+        guard let bounds = exactCaret ?? (persistent ? index.flatMap {
+            insertionBoundsFromGlyphs(of: element, at: $0, rtl: fallbackRTL)
+        } : nil), let rect = Self.appKitRect(bounds) else {
             guard persistent, index != nil || isEditableField(element) else { return .unavailable }
             return .editorWithoutCaret(editorAnchor(in: element))
         }
 
-        var rtl = Locale.Language(identifier: LayoutSwitcher.currentLanguageCode() ?? "und").characterDirection == .rightToLeft
-        if let index {
+        var rtl = fallbackRTL
+        if exactCaret != nil, let index {
             // Compare insertion positions on this line; no text content is needed.
             if index < Int.max, let next = insertionBounds(of: element, at: index + 1),
                abs(bounds.midY - next.midY) < 1, next.midX != bounds.midX {
@@ -618,13 +634,37 @@ final class CaretIndicator: NSObject {
     }
 
     private func selectedRange(of element: AXUIElement) -> CFRange? {
-        var rangeValue: AnyObject?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
-              let rv = rangeValue, CFGetTypeID(rv) == AXValueGetTypeID() else { return nil }
-        var range = CFRange(location: 0, length: 0)
-        guard AXValueGetValue(rv as! AXValue, .cfRange, &range) else { return nil }
+        func decode(_ value: CFTypeRef?) -> CFRange? {
+            guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+            var range = CFRange(location: 0, length: 0)
+            guard AXValueGetValue(value as! AXValue, .cfRange, &range),
+                  range.location >= 0, range.length >= 0 else { return nil }
+            return range
+        }
 
-        return range.location >= 0 && range.length >= 0 ? range : nil
+        var rangeValue: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
+           let range = decode(rangeValue) { return range }
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangesAttribute as CFString, &rangeValue) == .success,
+              let ranges = rangeValue as? [AnyObject], ranges.count == 1 else { return nil }
+        return decode(ranges[0])
+    }
+
+    private func insertionBoundsFromGlyphs(of element: AXUIElement, at index: Int, rtl: Bool) -> CGRect? {
+        // A following glyph anchors the boundary to the correct row at a line wrap.
+        if index < Int.max, let next = textBounds(of: element, range: CFRange(location: index, length: 1)),
+           let caret = Self.insertionEdge(of: next, following: true, rtl: rtl) { return caret }
+        guard index > 0,
+              let previous = textBounds(of: element, range: CFRange(location: index - 1, length: 1)) else { return nil }
+        return Self.insertionEdge(of: previous, following: false, rtl: rtl)
+    }
+
+    static func insertionEdge(of glyph: CGRect, following: Bool, rtl: Bool) -> CGRect? {
+        guard glyph.origin.x.isFinite, glyph.origin.y.isFinite,
+              (1...96).contains(glyph.height), (0...min(64, glyph.height * 2)).contains(glyph.width),
+              glyph.width > 0 else { return nil }
+        let x = following != rtl ? glyph.minX : glyph.maxX
+        return CGRect(x: x, y: glyph.minY, width: 0, height: glyph.height)
     }
 
     private func insertionBounds(of element: AXUIElement, at index: Int) -> CGRect? {

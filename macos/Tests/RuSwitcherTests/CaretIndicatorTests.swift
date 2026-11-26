@@ -87,8 +87,32 @@ struct CaretIndicatorTests {
         let size = CGSize(width: 81, height: 21)
         let wide = CGRect(x: 10, y: 45, width: 580, height: 70)
         let narrowMargin = CGRect(x: 10, y: 5, width: 580, height: 70)
-        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: wide, size: size, visible: visible)?.y == 16)
-        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: narrowMargin, size: size, visible: visible)?.y == 115)
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: wide, size: size, visible: visible)
+                == CGPoint(x: 509, y: 16))
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: narrowMargin, size: size, visible: visible)
+                == CGPoint(x: 509, y: 115))
+    }
+
+    @Test func fieldOnlyFallbackUsesTheTrailingEdge() {
+        let visible = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let editor = CGRect(x: 220, y: 66, width: 250, height: 70)
+        let size = CGSize(width: 81, height: 21)
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: editor, size: size, visible: visible)
+                == CGPoint(x: 478, y: 90.5))
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: editor, size: size, visible: visible, rtl: true)
+                == CGPoint(x: 131, y: 90.5))
+    }
+
+    @Test func usesLogicalEdgesOfAdjacentGlyphsAndRejectsFieldBounds() {
+        let glyph = CGRect(x: 140, y: 90, width: 9, height: 18)
+        let left = CGRect(x: 140, y: 90, width: 0, height: 18)
+        let right = CGRect(x: 149, y: 90, width: 0, height: 18)
+        #expect(CaretIndicator.insertionEdge(of: glyph, following: true, rtl: false) == left)
+        #expect(CaretIndicator.insertionEdge(of: glyph, following: false, rtl: false) == right)
+        #expect(CaretIndicator.insertionEdge(of: glyph, following: true, rtl: true) == right)
+        #expect(CaretIndicator.insertionEdge(of: glyph, following: false, rtl: true) == left)
+        let field = CGRect(x: 140, y: 90, width: 440, height: 35)
+        #expect(CaretIndicator.insertionEdge(of: field, following: true, rtl: false) == nil)
     }
 
     @Test func translationPopoverUsesTheNearestAvailableSideOfTheBadge() {
