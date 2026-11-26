@@ -107,7 +107,7 @@ internal sealed class TrayIcon : IDisposable
             {
                 if (InputTarget.Capture() is { IsPasswordEdit: false } target && target.Foreground != _hwnd
                     && Form.ActiveForm is null)
-                    Badge().ShowAtCaret(target.Layout, persistent: true, canCorrect: CanCorrectCaret?.Invoke(target) == true);
+                    Badge().ShowAtCaret(target.Layout, persistent: true, canCorrect: CanCorrectCaret);
                 else _badge?.Hide();
             }
             if (!_visible && !Settings.Current.HideTrayIcon && Environment.TickCount64 >= _nextTrayAttempt)

@@ -15,6 +15,9 @@ internal sealed class CaretBadge : Form
     private IntPtr _layout;
     private bool _persistent;
     private bool _canCorrect;
+    private bool _probingEditor;
+    private int _placementRevision;
+    private InputTarget? _visibleTarget;
     private (IntPtr Handle, Rectangle Bounds)? _fallbackWindow;
     private Point? _fallbackPointer;
     public event Action? Correct;
@@ -67,50 +70,105 @@ internal sealed class CaretBadge : Form
             Correct?.Invoke();
     }
 
-    public void ShowAtCaret(IntPtr layout, bool persistent = false, bool canCorrect = false)
+    public void ShowAtCaret(IntPtr layout, bool persistent = false, Func<InputTarget, bool>? canCorrect = null)
     {
         if (InputTarget.Capture() is not { IsPasswordEdit: false } target) { Hide(); return; }
         uint thread = GetWindowThreadProcessId(target.Foreground, out _);
         var info = new GUITHREADINFO { cbSize = (uint)Marshal.SizeOf<GUITHREADINFO>() };
         if (thread == 0 || !GetGUIThreadInfo(thread, ref info)) { Hide(); return; }
-        var area = Rectangle.Empty;
-        Point origin;
-        ClientSize = new Size(persistent ? 48 : 24, 20);
+
         var caret = new POINT { X = info.caretRight, Y = persistent ? info.caretTop : info.caretBottom };
-        if (info.hwndCaret != IntPtr.Zero && ClientToScreen(info.hwndCaret, ref caret))
+        if (info.hwndCaret != IntPtr.Zero && info.caretBottom > info.caretTop && ClientToScreen(info.hwndCaret, ref caret))
         {
-            _fallbackWindow = null;
-            _fallbackPointer = null;
+            _placementRevision++;
+            ClearPointerAnchor();
             var point = new Point(caret.X, caret.Y);
-            area = Screen.FromPoint(point).WorkingArea;
-            origin = persistent ? new Point(point.X, point.Y - Height - 5)
+            var origin = persistent ? new Point(point.X, point.Y - ClientSize.Height - 5)
                 : new Point(point.X + 5, point.Y + 3);
+            Present(target, layout, persistent, canCorrect?.Invoke(target) == true,
+                Screen.FromPoint(point).WorkingArea, origin);
+            return;
         }
-        else if (persistent && canCorrect && GetWindowRect(target.Foreground, out var rect))
+
+        if (_visibleTarget is { } visibleTarget && !visibleTarget.SameControl(target)) Hide();
+        if (!_probingEditor) _ = ShowFromAccessibilityAsync(target, layout, persistent, canCorrect);
+    }
+
+    private async Task ShowFromAccessibilityAsync(InputTarget target, IntPtr layout, bool persistent,
+                                                    Func<InputTarget, bool>? canCorrect)
+    {
+        int revision = ++_placementRevision;
+        _probingEditor = true;
+        AccessibleText.BadgeAnchor? anchor;
+        try { anchor = await AccessibleText.FindBadgeAnchorAsync(target); }
+        finally { _probingEditor = false; }
+
+        if (IsDisposed || revision != _placementRevision || Form.ActiveForm is not null) return;
+        if (InputTarget.Capture() != target) { Hide(); return; }
+        if (!GetWindowRect(target.Foreground, out var rect)) { Hide(); return; }
+        var window = Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        bool correctionReady = canCorrect?.Invoke(target) == true;
+        var badgeSize = new Size(persistent ? 48 : 24, 20);
+        if (anchor is { } measured)
         {
-            // Keep the fallback inside the same window while moving the pointer onto the button.
-            var window = Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+            var area = Rectangle.Intersect(window, Screen.FromRectangle(measured.Bounds).WorkingArea);
+            if (AccessibleOrigin(measured, badgeSize, persistent, area) is { } origin)
+            {
+                ClearPointerAnchor();
+                Present(target, layout, persistent, correctionReady, area, origin);
+                return;
+            }
+        }
+
+        if (persistent && correctionReady)
+        {
             if (_fallbackWindow != (target.Foreground, window))
             {
                 _fallbackWindow = (target.Foreground, window);
                 _fallbackPointer = null;
             }
             var pointer = _fallbackPointer ?? Cursor.Position;
-            if (!window.Contains(pointer)) { Hide(); return; }
-            _fallbackPointer = pointer;
-            area = Rectangle.Intersect(window, Screen.FromPoint(pointer).WorkingArea);
-            origin = new Point(pointer.X - Width - 12, pointer.Y - Height - 12);
-            if (origin.Y < area.Top) origin.Y = pointer.Y + 12;
+            if (window.Contains(pointer))
+            {
+                _fallbackPointer = pointer;
+                var area = Rectangle.Intersect(window, Screen.FromPoint(pointer).WorkingArea);
+                var origin = new Point(pointer.X - badgeSize.Width - 12, pointer.Y - badgeSize.Height - 12);
+                if (origin.Y < area.Top) origin.Y = pointer.Y + 12;
+                Present(target, layout, persistent, correctionReady, area, origin);
+                return;
+            }
         }
-        else
-        {
-            _fallbackPointer = null;
-            Hide();
-            return;
-        }
+        ClearPointerAnchor();
+        Hide();
+    }
+
+    internal static Point? AccessibleOrigin(AccessibleText.BadgeAnchor anchor, Size size, bool persistent, Rectangle area)
+    {
+        if (area.Width < size.Width || area.Height < size.Height || !area.IntersectsWith(anchor.Bounds)) return null;
+        var visible = Rectangle.Intersect(area, anchor.Bounds);
+        int x = visible.Left + (anchor.IsCaret && persistent ? 0 : 5);
+        int above = visible.Top - size.Height - 5;
+        int below = visible.Bottom + 3;
+        bool preferAbove = persistent || !anchor.IsCaret;
+        int y = preferAbove ? (above >= area.Top ? above : below)
+            : (below + size.Height <= area.Bottom ? below : above);
+        if (y < area.Top || y + size.Height > area.Bottom) return null;
+        return new Point(Math.Clamp(x, area.Left, area.Right - size.Width), y);
+    }
+
+    private void ClearPointerAnchor()
+    {
+        _fallbackWindow = null;
+        _fallbackPointer = null;
+    }
+
+    private void Present(InputTarget target, IntPtr layout, bool persistent, bool canCorrect, Rectangle area, Point origin)
+    {
+        ClientSize = new Size(persistent ? 48 : 24, 20);
         if (area.Width < Width || area.Height < Height) { Hide(); return; }
         Location = new Point(Math.Clamp(origin.X, area.Left, area.Right - Width),
             Math.Clamp(origin.Y, area.Top, area.Bottom - Height));
+        _visibleTarget = target;
         _canCorrect = canCorrect;
         _persistent = persistent;
         Opacity = persistent ? (Bounds.Contains(Cursor.Position) ? 0.94 : 0.72) : 1;
