@@ -15,6 +15,7 @@ internal sealed class TrayIcon : IDisposable
     private const uint ID_SETTINGS = 14;
     private const uint ID_AUTO = 15;
     private const uint ID_UPDATE = 16;
+    private const uint ID_TASKS = 18;
     private const uint ID_CLIPBOARD = 17;
     private const uint ID_LAYOUT_FIRST = 100;
 
@@ -25,6 +26,7 @@ internal sealed class TrayIcon : IDisposable
     private Icon? _icon;
     private CaretBadge? _badge;
     private bool _visible;
+    private long _nextTrayAttempt;
     private bool _monochrome;
     private IntPtr _shownLayout;
     private bool _menuOpen;
@@ -33,6 +35,8 @@ internal sealed class TrayIcon : IDisposable
     private bool _enabled = Settings.Current.KeyboardEnabled;
 
     public GlobalShortcuts Shortcuts { get; private set; } = null!;
+    public Func<string>? AutoStatus { get; set; }
+    public event Action? TasksRequested;
     public ClipboardHistory ClipboardHistory { get; private set; } = null!;
     public event Action<string>? Diagnostic;
     public event Action<bool>? EnabledChanged;
@@ -43,6 +47,9 @@ internal sealed class TrayIcon : IDisposable
     public event Action? TriggerActivated;
     /// <summary>Fired on the message-loop thread when an as-you-type auto-convert was posted from the hook.</summary>
     public event Action? AutoConvertActivated;
+    public event Action? CaretCorrectionRequested;
+    public Func<InputTarget, bool>? CanCorrectCaret { get; set; }
+    public bool CaretButtonHit => _badge?.ButtonHit == true;
 
     public TrayIcon() => _wndProc = WindowProc;
 
@@ -96,6 +103,15 @@ internal sealed class TrayIcon : IDisposable
         _layoutTimer.Tick += (_, _) =>
         {
             RefreshLayout();
+            if (Settings.Current.CaretCorrection)
+            {
+                if (InputTarget.Capture() is { IsPasswordEdit: false } target && target.Foreground != _hwnd
+                    && Form.ActiveForm is null)
+                    Badge().ShowAtCaret(target.Layout, persistent: true, canCorrect: CanCorrectCaret);
+                else _badge?.Hide();
+            }
+            if (!_visible && !Settings.Current.HideTrayIcon && Environment.TickCount64 >= _nextTrayAttempt)
+                AddTrayIcon();
             ClipboardHistory.Poll();
             Shortcuts.Poll();
         };
@@ -113,17 +129,30 @@ internal sealed class TrayIcon : IDisposable
     public void RefreshAppearance()
     {
         bool show = !Settings.Current.HideTrayIcon;
-        if (show != _visible)
+        if (show && !_visible) AddTrayIcon();
+        else if (!show && _visible)
         {
-            if (show) _visible = Shell_NotifyIconW(NIM_ADD, ref _nid);
-            else { Shell_NotifyIconW(NIM_DELETE, ref _nid); _visible = false; }
+            Shell_NotifyIconW(NIM_DELETE, ref _nid);
+            _visible = false;
         }
-        if (!Settings.Current.CaretIndicator)
-        {
-            _badge?.Dispose();
-            _badge = null;
-        }
+        _badge?.Dispose();
+        _badge = null;
         RefreshLayout();
+    }
+
+    private void AddTrayIcon()
+    {
+        _visible = Shell_NotifyIconW(NIM_ADD, ref _nid);
+        if (_visible)
+        {
+            if (_nextTrayAttempt != 0) Diagnostic?.Invoke("start: tray icon recovered");
+            _nextTrayAttempt = 0;
+        }
+        else
+        {
+            if (_nextTrayAttempt == 0) Diagnostic?.Invoke("start: tray icon unavailable; retrying");
+            _nextTrayAttempt = Environment.TickCount64 + 1000;
+        }
     }
 
     private void RefreshLayout()
@@ -139,17 +168,23 @@ internal sealed class TrayIcon : IDisposable
         data.hIcon = next.Handle;
         data.szTip = LayoutTooltip(layout);
         if (_visible && !Shell_NotifyIconW(NIM_MODIFY, ref data))
-        {
-            next.Dispose();
-            return;
-        }
+            _visible = false; // Explorer can disappear before TaskbarCreated arrives.
         _icon?.Dispose();
         _icon = next;
         _nid = data;
         _shownLayout = layout;
         _monochrome = monochrome;
-        if (changed && Settings.Current.CaretIndicator)
-            (_badge ??= new CaretBadge()).ShowAtCaret(layout);
+        if (changed) Sound.Switch(layout, LayoutSwitcher.ConsumeAutomaticSwitch(layout));
+        if (changed && Settings.Current.CaretIndicator && !Settings.Current.CaretCorrection)
+            Badge().ShowAtCaret(layout);
+    }
+
+    private CaretBadge Badge()
+    {
+        if (_badge is not null) return _badge;
+        _badge = new CaretBadge();
+        _badge.Correct += () => CaretCorrectionRequested?.Invoke();
+        return _badge;
     }
 
     internal static string TriggerName(TriggerKind t) => t switch
@@ -243,6 +278,9 @@ internal sealed class TrayIcon : IDisposable
             AppendMenuW(menu, MF_SEPARATOR, 0, null);
         AppendMenuW(menu, MF_STRING | Chk(_enabled), ID_ENABLE, L10n.T("tray.enable"));
         AppendMenuW(menu, MF_STRING | Chk(s.AutoConvert), ID_AUTO, L10n.T("tray.auto"));
+        if (AutoStatus?.Invoke() is { } status)
+            AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, status);
+        AppendMenuW(menu, MF_STRING, ID_TASKS, L10n.T("tasks.title"));
         if (s.ClipboardHistoryEnabled)
             AppendMenuW(menu, MF_STRING, ID_CLIPBOARD, L10n.T("clipboard.title"));
         AppendMenuW(menu, MF_STRING, ID_SETTINGS, L10n.T("tray.settings"));
@@ -269,6 +307,7 @@ internal sealed class TrayIcon : IDisposable
         switch (command)
         {
             case ID_ENABLE: SetEnabled(!_enabled); break;
+            case ID_TASKS: TasksRequested?.Invoke(); break;
             case ID_CLIPBOARD:
                 if (target != IntPtr.Zero) SetForegroundWindow(target);
                 ClipboardHistory.Show();

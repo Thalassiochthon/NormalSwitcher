@@ -15,8 +15,8 @@ internal static class LayoutSwitcher
         int n = GetKeyboardLayoutList(0, null);
         if (n <= 0) return Array.Empty<IntPtr>();
         var list = new IntPtr[n];
-        GetKeyboardLayoutList(n, list);
-        return list;
+        int copied = GetKeyboardLayoutList(n, list);
+        return list.Take(copied).Where(layout => layout != IntPtr.Zero).Distinct().ToArray();
     }
 
     /// <summary>HKL of the layout active in the focused window's thread.</summary>
@@ -27,18 +27,29 @@ internal static class LayoutSwitcher
         return GetKeyboardLayout(tid);
     }
 
-    public static IntPtr? Opposite()
+    public static IntPtr? NextInstalled() => NextInstalled(Current(), Installed());
+
+    internal static IntPtr? NextInstalled(IntPtr current, IntPtr[] installed)
     {
-        foreach (var layout in ConversionTargets(Current())) return layout;
+        if (installed.Length < 2) return null;
+        int index = Array.IndexOf(installed, current);
+        return installed[(index + 1) % installed.Length];
+    }
+
+    internal static IntPtr? CorrectionTarget(IntPtr current)
+    {
+        foreach (var layout in ConversionTargets(current)) return layout;
         return null;
     }
 
     internal static IEnumerable<IntPtr> ConversionTargets(IntPtr current)
     {
         var settings = Settings.Current;
-        var layouts = Installed();
-        var first = new IntPtr(settings.FirstLayout);
-        var second = new IntPtr(settings.SecondLayout);
+        return ConversionTargets(current, Installed(), new(settings.FirstLayout), new(settings.SecondLayout));
+    }
+
+    internal static IEnumerable<IntPtr> ConversionTargets(IntPtr current, IntPtr[] layouts, IntPtr first, IntPtr second)
+    {
         if (first != second && layouts.Contains(first) && layouts.Contains(second))
         {
             if (current == first) yield return second;
@@ -59,13 +70,23 @@ internal static class LayoutSwitcher
             ? preferred : installed.ElementAtOrDefault(first ? 0 : 1);
     }
 
+    private static (IntPtr Window, IntPtr Layout, long Expires)? _automaticSwitch;
+
+    internal static bool ConsumeAutomaticSwitch(IntPtr layout)
+    {
+        var requested = _automaticSwitch;
+        _automaticSwitch = null;
+        return requested is { } expected && expected.Expires >= Environment.TickCount64
+            && expected.Layout == layout && expected.Window == GetForegroundWindow();
+    }
+
     /// <summary>Switch the focused window to <paramref name="hkl"/>.</summary>
     public static void SwitchTo(IntPtr hkl) => SwitchTo(hkl, GetForegroundWindow());
 
-    internal static void SwitchTo(IntPtr hkl, IntPtr hwnd)
+    internal static void SwitchTo(IntPtr hkl, IntPtr hwnd, bool automatic = false)
     {
-        if (hwnd != IntPtr.Zero)
-            PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl);
-        Sound.Switch();   // issue #7: optional cue on layout change
+        _automaticSwitch = null;
+        if (hwnd != IntPtr.Zero && PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, hkl) != IntPtr.Zero && automatic)
+            _automaticSwitch = (hwnd, hkl, Environment.TickCount64 + 800);
     }
 }

@@ -49,8 +49,7 @@ internal static class Converter
         IntPtr activeHkl = LayoutSwitcher.Current();
         var keys = buffer.CurrentWord;
         IntPtr sourceHkl = KeyMapper.TextLayout(keys, activeHkl);
-        IntPtr targetHkl = LayoutSwitcher.ConversionTargets(sourceHkl).FirstOrDefault();
-        if (targetHkl == IntPtr.Zero) return false;
+        if (LayoutSwitcher.CorrectionTarget(sourceHkl) is not { } targetHkl) return false;
 
         // Split off trailing real punctuation (kept as typed).
         int coreCount = keys.Count;
@@ -82,6 +81,35 @@ internal static class Converter
         _bText = original;  _bHkl = sourceHkl;    // the alternative (undo target)
         _lastWasAuto = false;                     // a manual convert isn't subject to learn-from-undo
         buffer.Reset();
+        return true;
+    }
+
+    internal static async Task<bool> CorrectCaretWordAsync(IReadOnlyList<TypedKey> keys, int spaces,
+        InputTarget target, Func<bool> stillCurrent, bool remember)
+    {
+        if (keys.Count is 0 or > 64 || !stillCurrent()
+            || LayoutSwitcher.CorrectionTarget(target.Layout) is not { } next) return false;
+        var settings = Settings.Current;
+        if ((settings.ExcludedApps.Count > 0 || settings.RemoteDesktopMode)
+            && AppLayoutTracker.ProcessName(target.Foreground) is { } app
+            && (settings.ExcludedApps.Contains(app, StringComparer.OrdinalIgnoreCase)
+                || (settings.RemoteDesktopMode && app is "mstsc" or "msrdc"))) return false;
+        string original = KeyMapper.ConvertWord(keys, target.Layout);
+        string corrected = KeyMapper.ConvertWord(keys, target.Layout, next);
+        if (original.Length != keys.Count || corrected.Length != keys.Count
+            || original == corrected || !corrected.All(char.IsLetter)
+            || settings.NeverConvert.Contains(original.ToLowerInvariant())
+            || settings.NeverConvert.Contains(corrected.ToLowerInvariant())) return false;
+        string boundary = new(' ', spaces);
+        if (!await target.MatchesTextAtCaretAsync(original + boundary) || !stillCurrent()
+            || !TextInjector.Replace(original.Length + spaces, corrected + boundary)) return false;
+        if (remember && !settings.AlwaysConvert.Contains(corrected, StringComparer.OrdinalIgnoreCase))
+        {
+            settings.AlwaysConvert.Add(corrected.ToLowerInvariant());
+            settings.Save();
+        }
+        LayoutSwitcher.SwitchTo(next, target.Foreground);
+        NoteAutoConversion(corrected + boundary, original + boundary, next, target.Layout, learn: false);
         return true;
     }
 
@@ -121,7 +149,7 @@ internal static class Converter
     public static bool ConvertSelection(bool smart)
     {
         IntPtr sourceHkl = LayoutSwitcher.Current();
-        if (LayoutSwitcher.Opposite() is not { } targetHkl) return false;
+        if (LayoutSwitcher.CorrectionTarget(sourceHkl) is not { } targetHkl) return false;
 
         return TransformSelection(sel => Settings.Current.ConvertByText ? KeyMapper.ConvertByText(sel, sourceHkl, targetHkl)
             : smart ? SmartConvert.Selection(sel, sourceHkl, targetHkl)

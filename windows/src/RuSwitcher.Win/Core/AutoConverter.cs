@@ -17,7 +17,7 @@ internal static class AutoConverter
     /// converted word followed by a space. Deferring off the hook thread keeps the callback O(1) and
     /// avoids the LowLevelHooksTimeout / silent-unhook trap (COM + SendInput must not run in-callback).
     /// Returns true if it converted; on "keep" it does nothing (the word + space stay as typed).</summary>
-    public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ")
+    public static async Task<bool> TryConvertWordAsync(IReadOnlyList<TypedKey> keys, InputTarget input, Func<bool> stillCurrent, string suffix = " ", bool preserveLayout = false, Action<string>? diagnostic = null)
     {
         if (keys.Count is 0 or > 64 || !stillCurrent()) return false;
         var settings = Settings.Current;
@@ -29,7 +29,11 @@ internal static class AutoConverter
 
         IntPtr sourceHkl = KeyMapper.TextLayout(keys, input.Layout);
         string typed = KeyMapper.ConvertWord(keys, sourceHkl);
-        if (typed.Length != keys.Count) return false;
+        if (typed.Length != keys.Count)
+        {
+            diagnostic?.Invoke("key-mapping-incomplete");
+            return false;
+        }
         string srcTag = SmartConvert.LangTag(sourceHkl);
         bool caps = keys.All(k => k.Caps);
 
@@ -61,7 +65,11 @@ internal static class AutoConverter
                     (before, after) => ShouldConvertPure(before, after, srcTag, targetTag, caps, Dict.Available,
                         Dict.CheckWord, settings.NeverConvert, settings.AlwaysConvert, CheckTarget));
                 if (plan == null) continue;
-                if (converted != null) return false; // More than one plausible destination.
+                if (converted != null)
+                {
+                    diagnostic?.Invoke("multiple-correction-targets");
+                    return false;
+                }
                 targetHkl = layout;
                 converted = settings.FixTwoCaps && !caps
                     ? TextFixes.TwoCaps(plan, word => CheckTarget(word, targetTag) == true) ?? plan
@@ -82,6 +90,8 @@ internal static class AutoConverter
         if (settings.FixTypos && TextFixes.Typo(keys, typed, key => KeyMapper.TranslateIn(key, sourceHkl),
                 word => CheckTarget(word, srcTag), word => CheckTarget(word, srcTag) == true) is { } typo)
             return await Replace(typo, sourceHkl, learn: true);
+        diagnostic?.Invoke(targets.Length == 0 && settings.AutoConvert
+            ? "no-layout-target" : "no-confident-correction");
         return false;
 
         bool? CheckTarget(string word, string tag) =>
@@ -99,12 +109,20 @@ internal static class AutoConverter
                 await Task.Delay(12);
                 matched = stillCurrent() && input.HasPlainTextAtCaret(expected);
             }
-            if (!matched || !stillCurrent()
-                || !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
+            string? failure = !stillCurrent() ? "focus-or-input-changed" : !matched ? "unverified-editor-text" : null;
+            if (failure is null && !TextInjector.Replace(backspaces: keys.Count + suffix.Length, text: replacement + suffix))
+                failure = "input-injection-failed";
+            if (failure is not null)
+            {
+                diagnostic?.Invoke(failure);
                 return false;
+            }
 
-            if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout);
-            Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, input.Layout, learn);
+            if (!preserveLayout)
+            {
+                if (layout != input.Layout) LayoutSwitcher.SwitchTo(layout, input.Foreground, automatic: true);
+                Converter.NoteAutoConversion(replacement + suffix, typed + suffix, layout, input.Layout, learn);
+            }
             return true;
         }
     }
@@ -135,6 +153,7 @@ internal static class AutoConverter
 
         // Explicit overrides (checked before the soft vetoes).
         if (never.Contains(typedLc) || never.Contains(convertedLc)) return false;
+        if (always.Contains(typedLc)) return false;
         if (always.Contains(convertedLc)) return true;
 
         // --- soft vetoes (cheap, before the dictionary) ---

@@ -38,6 +38,8 @@ public sealed class Settings
     /// <summary>issue #7: play a sound when the layout switches. Default off.</summary>
     public bool SoundOnSwitch { get; set; } = false;
     public string LayoutSound { get; set; } = Sound.Default;
+    public bool DoubleAutoLayoutSound { get; set; }
+    public Dictionary<long, string> LayoutSounds { get; set; } = new();
 
     /// <summary>issue #14: a separate hotkey that only switches the layout (no conversion).
     /// Off by default; when on, uses <see cref="SwitchTrigger"/> (kept distinct from Trigger).</summary>
@@ -57,6 +59,7 @@ public sealed class Settings
     public bool WordEndOnEnter { get; set; }
     public bool WordEndOnTab { get; set; }
     public Dictionary<string, string> Abbreviations { get; set; } = new(StringComparer.Ordinal);
+    public bool TaskShortcutsInitialized { get; set; }
     public Dictionary<ShortcutAction, KeyChord> GlobalShortcuts { get; set; } = new();
     public bool KeyboardEnabled { get; set; } = true;
     public bool HideTrayIcon { get; set; }
@@ -101,8 +104,14 @@ public sealed class Settings
     public long FirstLayout { get; set; }
     public long SecondLayout { get; set; }
 
+    public bool ReceiveBetaUpdates { get; set; }
     public bool ClipboardHistoryEnabled { get; set; }
     public bool ClipboardHistoryPersistent { get; set; }
+    public int ClipboardImageLimit { get; set; } = 10;
+    public int ClipboardWindowWidth { get; set; } = 540;
+    public int ClipboardWindowHeight { get; set; } = 405;
+    public bool CaretCorrection { get; set; }
+    public bool RememberCaretCorrections { get; set; } = true;
     public ClipboardShortcut ClipboardHistoryShortcut { get; set; }
     public KeyChord? ClipboardCustomShortcut { get; set; }
 

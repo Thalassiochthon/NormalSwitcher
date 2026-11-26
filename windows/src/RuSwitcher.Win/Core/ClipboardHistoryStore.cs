@@ -7,10 +7,10 @@ internal sealed class ClipboardHistoryStore(string path)
 {
     public const int Limit = 30;
     public const int MaxEntryLength = 100_000;
-    private const int MaxFileBytes = 20 * 1024 * 1024;
+    private const int MaxFileBytes = 96 * 1024 * 1024;
     private static readonly byte[] Entropy = "NormalSwitcher.Windows.ClipboardHistory.v1"u8.ToArray();
 
-    public string[] Read()
+    public ClipboardEntry[] Read(int imageLimit)
     {
         using var file = File.OpenRead(path);
         if (file.Length > MaxFileBytes) throw new InvalidDataException("Clipboard history is too large");
@@ -19,18 +19,23 @@ internal sealed class ClipboardHistoryStore(string path)
         byte[] clear = ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser);
         try
         {
-            return (JsonSerializer.Deserialize<string[]>(clear) ?? [])
-                .Where(IsValid).Distinct().Take(Limit).ToArray();
+            using var document = JsonDocument.Parse(clear);
+            if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException();
+            var root = document.RootElement;
+            return ClipboardEntry.Trim(root.GetArrayLength() > 0 && root[0].ValueKind == JsonValueKind.String
+                ? (root.Deserialize<string[]>() ?? []).Select(text => new ClipboardEntry(text))
+                : root.Deserialize<ClipboardEntry[]>() ?? [], imageLimit);
         }
         finally { CryptographicOperations.ZeroMemory(clear); }
     }
 
-    public void Write(IEnumerable<string> entries)
+    public void Write(IEnumerable<ClipboardEntry> entries)
     {
         byte[] clear = JsonSerializer.SerializeToUtf8Bytes(entries);
         byte[] encrypted;
         try { encrypted = ProtectedData.Protect(clear, Entropy, DataProtectionScope.CurrentUser); }
         finally { CryptographicOperations.ZeroMemory(clear); }
+        if (encrypted.Length > MaxFileBytes) throw new InvalidDataException("Clipboard history is too large");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         string staged = path + ".tmp";
         try

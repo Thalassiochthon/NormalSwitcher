@@ -23,10 +23,10 @@ internal static class Updater
     private const string ReleaseUrl = "http://127.0.0.1:18443/tag/win-v";
     private const string InstallerUrl = "http://127.0.0.1:18443/download/win-v";
 #else
-    private const string FeedUrl = "https://raw.githubusercontent.com/antonjas/NormalSwitcher/windows-preview/windows/version.json";
+    private const string FeedUrl = "https://raw.githubusercontent.com/Thalassiochthon/NormalSwitcher/windows-preview/windows/version.json";
 
-    private const string ReleaseUrl = "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v";
-    private const string InstallerUrl = "https://github.com/antonjas/NormalSwitcher/releases/download/win-v";
+    private const string ReleaseUrl = "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/win-v";
+    private const string InstallerUrl = "https://github.com/Thalassiochthon/NormalSwitcher/releases/download/win-v";
 #endif
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{D729A5A6-DE1C-5068-A3B9-97BED831D11B}_is1";
     private const long MaxInstallerBytes = 256L * 1024 * 1024;
@@ -52,6 +52,49 @@ internal static class Updater
     /// <summary>Current app version (from the assembly; kept in sync with windows/version.json).</summary>
     public static Version Current =>
         Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
+
+    internal static string CurrentRelease
+    {
+        get
+        {
+            var information = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0];
+            return information != null && TryRelease(information, out _, out _) ? information : Current.ToString(3);
+        }
+    }
+
+    private static bool TryRelease(string? value, out Version version, out int beta)
+    {
+        version = new Version(0, 0, 0);
+        beta = 0;
+        if (string.IsNullOrEmpty(value)) return false;
+        var parts = value.Split("-beta.", StringSplitOptions.None);
+        if (parts.Length > 2 || !Version.TryParse(parts[0], out var core) ||
+            core.Build < 0 || core.Revision >= 0 || core.ToString(3) != parts[0]) return false;
+        if (parts.Length == 2 && (!int.TryParse(parts[1], out beta) || beta <= 0 ||
+            beta.ToString(System.Globalization.CultureInfo.InvariantCulture) != parts[1])) return false;
+        version = core;
+        return true;
+    }
+
+    internal static int CompareReleases(string left, string right)
+    {
+        if (!TryRelease(left, out var a, out int aBeta) || !TryRelease(right, out var b, out int bBeta))
+            throw new ArgumentException("Invalid release version");
+        int core = a.CompareTo(b);
+        if (core != 0 || aBeta == bBeta) return core;
+        if (aBeta == 0) return 1;
+        if (bBeta == 0) return -1;
+        return aBeta.CompareTo(bBeta);
+    }
+
+    internal static void UpdatePreferenceChanged()
+    {
+        if (!Settings.Current.ReceiveBetaUpdates && AvailableVersion?.Contains("-beta.", StringComparison.Ordinal) == true)
+            AvailableVersion = null;
+        Settings.Current.LastUpdateCheckTicks = 0;
+        Settings.Current.Save();
+    }
 
     /// <summary>Checks once shortly after launch and periodically while the app is open.</summary>
     public static void CheckOnLaunch(SynchronizationContext ui)
@@ -88,25 +131,19 @@ internal static class Updater
         _busy = true;
         try
         {
-            Feed? feed = null;
-            try
-            {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                http.DefaultRequestHeaders.UserAgent.ParseAdd("NormalSwitcher-Win-Updater");
-                string json = await http.GetStringAsync(FeedUrl);
-                feed = JsonSerializer.Deserialize<Feed>(json);
-            }
-            catch
-            {
-                if (_showResult) MessageBox.Show(
-                    L10n.T("upd.error"), L10n.T("app.name"),
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("NormalSwitcher-Win-Updater");
+            Task<Feed?> stableRequest = ReadFeedAsync(http, FeedUrl, beta: false);
+            Task<Feed?> betaRequest = Settings.Current.ReceiveBetaUpdates
+                ? ReadFeedAsync(http, FeedUrl.Replace("/version.json", "/version-beta.json"), beta: true)
+                : Task.FromResult<Feed?>(null);
+            var feed = await stableRequest;
+            var beta = await betaRequest;
+            if (Settings.Current.ReceiveBetaUpdates && beta != null &&
+                (feed == null || CompareReleases(beta.version, feed.version) > 0))
+                feed = beta;
 
-            if (feed == null || !Version.TryParse(feed.version, out var latest)
-                || latest.Build < 0 || latest.Revision >= 0 || latest.ToString(3) != feed.version
-                || !string.Equals(feed.url, ReleaseUrl + feed.version, StringComparison.Ordinal))
+            if (feed == null)
             {
                 if (_showResult) MessageBox.Show(L10n.T("upd.error"), L10n.T("app.name"),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -116,16 +153,17 @@ internal static class Updater
             Settings.Current.LastUpdateCheckTicks = DateTime.UtcNow.Ticks;
             Settings.Current.Save();
 
-            AvailableVersion = latest > Current && Settings.Current.SkippedVersion != feed.version
+            bool newer = CompareReleases(feed.version, CurrentRelease) > 0;
+            AvailableVersion = newer && Settings.Current.SkippedVersion != feed.version
                 ? feed.version : null;
-            if (_showResult && latest > Current)
+            if (_showResult && newer)
             {
                 await PromptUpdateAsync(feed);
             }
             else if (_showResult)
             {
                 MessageBox.Show(
-                    L10n.T("upd.uptodate", Current.ToString(3)),
+                    L10n.T("upd.uptodate", CurrentRelease),
                     L10n.T("app.name"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
@@ -134,6 +172,31 @@ internal static class Updater
             _showResult = false;
             _busy = false;
         }
+    }
+
+    private static async Task<Feed?> ReadFeedAsync(HttpClient http, string url, bool beta)
+    {
+        try
+        {
+            var feed = JsonSerializer.Deserialize<Feed>(await http.GetStringAsync(url));
+            return feed != null && TryRelease(feed.version, out _, out int revision) &&
+                (revision > 0) == beta && MatchesReleaseUrl(feed.url, feed.version) ? feed : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    internal static bool MatchesReleaseUrl(string url, string version)
+    {
+        if (string.Equals(url, ReleaseUrl + version, StringComparison.Ordinal)) return true;
+#if NORMALSWITCHER_UPDATE_SMOKE
+        return false;
+#else
+        return string.Equals(url, "https://github.com/antonjas/NormalSwitcher/releases/tag/win-v" + version,
+            StringComparison.Ordinal);
+#endif
     }
 
     private const string UpdateMode = "--install-update";
@@ -169,27 +232,26 @@ internal static class Updater
             }
         }
 
-        string body = L10n.T("upd.available.body", feed.version, Current.ToString(3));
+        string body = L10n.T("upd.available.body", feed.version, CurrentRelease);
         if (!string.IsNullOrWhiteSpace(feed.notes)) body += "\n\n" + feed.notes;
         body += "\n\n" + L10n.T("upd.open");
         if (MessageBox.Show(body, L10n.T("upd.available.title"),
                 MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
-            OpenRelease(feed.url);
+            OpenRelease(ReleaseUrl + feed.version);
     }
 
     internal static bool RunHelper(string[] args)
     {
         if (args.Length == 0 || args[0] != UpdateMode) return false;
         if (args.Length != 5 || !int.TryParse(args[1], out int pid) || pid <= 0 ||
-            !Version.TryParse(args[2], out var version) || version.Build < 0 ||
-            version.Revision >= 0 || version.ToString(3) != args[2] || version <= Current ||
+            !TryRelease(args[2], out _, out _) || CompareReleases(args[2], CurrentRelease) <= 0 ||
             !IsInstallerHash(args[3]) ||
             !string.Equals(Environment.ProcessPath, HelperPath, StringComparison.OrdinalIgnoreCase) ||
             InstalledExecutable() is not { } installed)
             return true;
 
         ApplicationConfiguration.Initialize();
-        using var dialog = new UpdateForm(args[2], Current.ToString(3), args[4]);
+        using var dialog = new UpdateForm(args[2], CurrentRelease, args[4]);
         dialog.DownloadPage += () => OpenRelease(ReleaseUrl + args[2]);
         dialog.Install += async () =>
         {

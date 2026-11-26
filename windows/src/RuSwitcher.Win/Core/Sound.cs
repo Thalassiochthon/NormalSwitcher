@@ -20,10 +20,21 @@ internal static class Sound
         _ => sound is not null && Choices.Contains(sound) ? sound : Default,
     };
 
-    public static void Switch()
+    internal static long LayoutKey(IntPtr layout) => layout.ToInt64() & 0xFFFFFFFF;
+
+    private static int _switchGeneration;
+
+    public static async void Switch(IntPtr layout, bool automatic)
     {
-        if (Settings.Current.SoundOnSwitch)
-            Play(Settings.Current.LayoutSound);
+        int generation = ++_switchGeneration;
+        var settings = Settings.Current;
+        if (!settings.SoundOnSwitch || layout == IntPtr.Zero) return;
+        string sound = settings.LayoutSounds.GetValueOrDefault(LayoutKey(layout), settings.LayoutSound);
+        Play(sound);
+        if (!automatic || !settings.DoubleAutoLayoutSound) return;
+        await Task.Delay(160);
+        if (generation == _switchGeneration && settings.SoundOnSwitch && settings.DoubleAutoLayoutSound)
+            Play(sound);
     }
 
     internal static void Play(string? sound)
