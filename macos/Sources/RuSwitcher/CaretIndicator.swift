@@ -277,7 +277,7 @@ final class CaretIndicator: NSObject {
             return
         }
         if persistent {
-            if case .known(let rect, _) = caret, positionAboveCaret(rect) {
+            if case .known(let rect, let rtl) = caret, position(forCaret: rect, rtl: rtl) {
                 pointerAnchor = nil
             } else if case .selection(let bounds, let editor) = caret,
                       positionOutsideEditor(selection: bounds, editor: editor, pid: app.processIdentifier) {
@@ -356,16 +356,6 @@ final class CaretIndicator: NSObject {
         return CGPoint(x: x.rounded(), y: y.rounded())
     }
 
-    private func positionAboveCaret(_ caret: CGRect) -> Bool {
-        for screen in NSScreen.screens {
-            if let origin = Self.aboveCaretOrigin(caret, size: panel.frame.size, visible: screen.visibleFrame) {
-                if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
-                return true
-            }
-        }
-        return false
-    }
-
     static func outsideEditorOrigin(selection: CGRect?, editor: CGRect?, size: CGSize, visible: CGRect) -> CGPoint? {
         guard let bounds = editor ?? selection, !visible.isNull,
               size.width <= visible.width, size.height <= visible.height,
@@ -441,7 +431,8 @@ final class CaretIndicator: NSObject {
         return code == "iw" ? "HE" : code.uppercased()
     }
 
-    static func origin(for caret: CGRect, size: CGSize, visible: CGRect, rtl: Bool) -> CGPoint? {
+    static func origin(for caret: CGRect, size: CGSize, visible: CGRect, rtl: Bool,
+                       allowVerticalFallback: Bool = false) -> CGPoint? {
         guard isInsertionRect(caret), visible.contains(CGPoint(x: caret.midX, y: caret.midY)),
               size.height <= visible.height else { return nil }
         let right = caret.maxX + 4
@@ -450,13 +441,14 @@ final class CaretIndicator: NSObject {
             let y = min(max(caret.midY - size.height / 2, visible.minY), visible.maxY - size.height)
             return CGPoint(x: x.rounded(), y: y.rounded())
         }
-        return nil
+        return allowVerticalFallback ? aboveCaretOrigin(caret, size: size, visible: visible) : nil
     }
 
     private func position(forCaret caret: NSRect, rtl: Bool) -> Bool {
         for screen in NSScreen.screens {
-            if let point = Self.origin(for: caret, size: panel.frame.size, visible: screen.visibleFrame, rtl: rtl) {
-                panel.setFrameOrigin(point)
+            if let point = Self.origin(for: caret, size: panel.frame.size, visible: screen.visibleFrame, rtl: rtl,
+                                       allowVerticalFallback: persistent) {
+                if panel.frame.origin != point { panel.setFrameOrigin(point) }
                 return true
             }
         }
@@ -562,8 +554,8 @@ final class CaretIndicator: NSObject {
             return .editorWithoutCaret(editorAnchor(in: element))
         }
 
-        var rtl = false
-        if !persistent, let index {
+        var rtl = Locale.Language(identifier: LayoutSwitcher.currentLanguageCode() ?? "und").characterDirection == .rightToLeft
+        if let index {
             // Compare insertion positions on this line; no text content is needed.
             if index < Int.max, let next = insertionBounds(of: element, at: index + 1),
                abs(bounds.midY - next.midY) < 1, next.midX != bounds.midX {
