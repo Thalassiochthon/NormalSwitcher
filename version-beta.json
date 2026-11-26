@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0x",
-  "build": "100",
+  "version": "1.2.0y",
+  "build": "101",
   "dev": "",
-  "notes": "В ChatGPT и других полях с неполными данными о каретке плашка может определить позицию рядом с соседним символом. Если доступны только границы поля, плашка размещается у его правой стороны.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0x",
-  "sha256": "908fbfa9e73a423afcc8246a147c4bbffefec109bdbfd7e1c1901e3a699eba42",
-  "source_commit": "e9ad14f0221fd6b4ef1cbd0edc08f4021be3c55e"
+  "notes": "В ChatGPT и других приложениях, которые сообщают только границы поля, плашка теперь остаётся рядом с началом ввода. При наличии координат каретки плашка следует за ней.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0y",
+  "sha256": "f17f4c26b7fc90693baca94d928f23612d66cbcdb55a2b3e862594253fd398c5",
+  "source_commit": "5b5032ae6b8ac9ac724ae20e6ad53690e8eea3e2"
 }
