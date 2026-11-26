@@ -284,10 +284,15 @@ final class CaretIndicator: NSObject {
             } else if case .selection(let bounds, let editor) = caret,
                       positionOutsideEditor(selection: bounds, editor: editor, pid: app.processIdentifier) {
                 pointerAnchor = nil
-            } else if case .editorWithoutCaret(let frame?) = caret,
-                      positionOutsideEditor(selection: nil, editor: frame, pid: app.processIdentifier, rtl: rtl) {
+            } else if case .editorWithoutCaret(let frame?, let hasSelection) = caret {
+                guard positionOutsideEditor(selection: nil, editor: frame, pid: app.processIdentifier,
+                                            rtl: rtl, hasSelection: hasSelection) else {
+                    pointerAnchor = nil
+                    hide()
+                    return
+                }
                 if !visible || pointerAnchor != nil {
-                    rslog("layout-indicator: editor trailing edge app=\(app.bundleIdentifier ?? "unknown")")
+                    rslog("layout-indicator: editor start app=\(app.bundleIdentifier ?? "unknown")")
                 }
                 pointerAnchor = nil
             } else {
@@ -359,22 +364,24 @@ final class CaretIndicator: NSObject {
     }
 
     static func outsideEditorOrigin(selection: CGRect?, editor: CGRect?, size: CGSize, visible: CGRect,
-                                    rtl: Bool = false) -> CGPoint? {
+                                    rtl: Bool = false, hasSelection: Bool = false) -> CGPoint? {
         guard let bounds = editor ?? selection, !visible.isNull,
               size.width <= visible.width, size.height <= visible.height,
               bounds.intersects(visible) else { return nil }
         let field = bounds.intersection(visible)
         let gap: CGFloat = 8
         if selection == nil {
-            let sideX = rtl ? field.minX - gap - size.width : field.maxX + gap
-            let alignedX = rtl ? field.minX : field.maxX - size.width
+            let inset = min(12, field.width / 2)
+            let alignedX = rtl ? field.maxX - inset - size.width : field.minX + inset
             let x = min(max(alignedX, visible.minX), visible.maxX - size.width)
-            let y = min(max(field.midY - size.height / 2, visible.minY), visible.maxY - size.height)
-            // Field bounds alone give no insertion point. Use the trailing edge or clear the field vertically.
-            return [CGPoint(x: sideX, y: y),
-                    CGPoint(x: x, y: field.minY - gap - size.height),
-                    CGPoint(x: x, y: field.maxY + 40)]
-                .first { visible.contains(CGRect(origin: $0, size: size)) }
+            let sideX = rtl ? field.maxX + gap : field.minX - gap - size.width
+            let side = CGPoint(x: sideX, y: field.maxY - size.height)
+            let above = CGPoint(x: x, y: field.maxY + (hasSelection ? 40 : gap))
+            let below = CGPoint(x: x, y: field.minY - gap - size.height)
+            // Keep the fallback near the first line. A selection may have a formatting toolbar above it.
+            var candidates = hasSelection ? [side, below, above] : [above, side]
+            if !hasSelection, field.height <= 2 * size.height { candidates.append(below) }
+            return candidates.first { visible.contains(CGRect(origin: $0, size: size)) }
         }
         let anchor = selection.flatMap { $0.intersects(field) ? $0.intersection(field) : nil }
         let reference = anchor.map { CGPoint(x: $0.midX, y: $0.midY) }
@@ -398,13 +405,15 @@ final class CaretIndicator: NSObject {
         return visible.contains(CGRect(origin: above, size: size)) ? above : nil
     }
 
-    private func positionOutsideEditor(selection: CGRect?, editor: CGRect?, pid: pid_t, rtl: Bool = false) -> Bool {
+    private func positionOutsideEditor(selection: CGRect?, editor: CGRect?, pid: pid_t,
+                                       rtl: Bool = false, hasSelection: Bool = false) -> Bool {
         guard let anchor = selection ?? editor else { return false }
         let window = focusedWindowFrame(pid: pid)
         for screen in NSScreen.screens where screen.frame.intersects(anchor) {
             let visible = window.map { $0.intersection(screen.visibleFrame) } ?? screen.visibleFrame
             if let origin = Self.outsideEditorOrigin(selection: selection, editor: editor,
-                                                      size: panel.frame.size, visible: visible, rtl: rtl) {
+                                                      size: panel.frame.size, visible: visible,
+                                                      rtl: rtl, hasSelection: hasSelection) {
                 if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
                 return true
             }
@@ -506,7 +515,7 @@ final class CaretIndicator: NSObject {
     private enum CaretLocation {
         case known(NSRect, rtl: Bool)
         case selection(NSRect, editor: NSRect?)
-        case editorWithoutCaret(NSRect?)
+        case editorWithoutCaret(NSRect?, hasSelection: Bool = false)
         case unavailable
         case protectedField
     }
@@ -521,7 +530,7 @@ final class CaretIndicator: NSObject {
             let location = caretLocation(in: element, fallbackRTL: fallbackRTL)
             switch location {
             case .unavailable: return nil
-            case .editorWithoutCaret(let anchor):
+            case .editorWithoutCaret(let anchor, _):
                 if anchor != nil || editorFallback == nil { editorFallback = location }
                 return nil
             default: return location
@@ -556,7 +565,7 @@ final class CaretIndicator: NSObject {
                bounds.width > 4, let selection = Self.appKitRect(bounds) {
                 return .selection(selection, editor: editor)
             }
-            return .editorWithoutCaret(editor)
+            return .editorWithoutCaret(editor, hasSelection: true)
         }
         if persistent, range == nil, let marker, marker.width > 4,
            isEditableField(element), let selection = Self.appKitRect(marker) {

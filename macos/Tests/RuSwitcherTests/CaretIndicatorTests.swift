@@ -82,25 +82,38 @@ struct CaretIndicatorTests {
         }
     }
 
-    @Test func editorFallbackUsesTheLowerMarginOrClearsTheFormattingToolbar() {
+    @Test func selectionWithoutBoundsClearsTheFormattingToolbar() {
         let visible = CGRect(x: 0, y: 0, width: 600, height: 400)
         let size = CGSize(width: 81, height: 21)
         let wide = CGRect(x: 10, y: 45, width: 580, height: 70)
         let narrowMargin = CGRect(x: 10, y: 5, width: 580, height: 70)
-        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: wide, size: size, visible: visible)
-                == CGPoint(x: 509, y: 16))
-        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: narrowMargin, size: size, visible: visible)
-                == CGPoint(x: 509, y: 115))
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: wide, size: size, visible: visible,
+                                                  hasSelection: true) == CGPoint(x: 22, y: 16))
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: narrowMargin, size: size, visible: visible,
+                                                  hasSelection: true) == CGPoint(x: 22, y: 115))
     }
 
-    @Test func fieldOnlyFallbackUsesTheTrailingEdge() {
-        let visible = CGRect(x: 0, y: 0, width: 600, height: 400)
-        let editor = CGRect(x: 220, y: 66, width: 250, height: 70)
+    @Test func fieldOnlyFallbackStaysNearTheStartAsTheEditorGetsWider() {
+        let visible = CGRect(x: 0, y: 0, width: 950, height: 400)
+        let editor = CGRect(x: 35, y: 26, width: 736, height: 54)
         let size = CGSize(width: 81, height: 21)
         #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: editor, size: size, visible: visible)
-                == CGPoint(x: 478, y: 90.5))
+                == CGPoint(x: 47, y: 88))
+        let wider = CGRect(x: editor.minX, y: editor.minY, width: 900, height: editor.height)
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: wider, size: size, visible: visible)
+                == CGPoint(x: 47, y: 88))
         #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: editor, size: size, visible: visible, rtl: true)
-                == CGPoint(x: 131, y: 90.5))
+                == CGPoint(x: 678, y: 88))
+    }
+
+    @Test func fieldOnlyFallbackKeepsTheBadgeNearTheFirstLineAtTheScreenEdge() {
+        let visible = CGRect(x: 0, y: 0, width: 950, height: 400)
+        let size = CGSize(width: 81, height: 21)
+        let sideSpace = CGRect(x: 120, y: 350, width: 600, height: 50)
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: sideSpace, size: size, visible: visible)
+                == CGPoint(x: 31, y: 379))
+        let editor = CGRect(x: 35, y: 250, width: 900, height: 150)
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: editor, size: size, visible: visible) == nil)
     }
 
     @Test func usesLogicalEdgesOfAdjacentGlyphsAndRejectsFieldBounds() {
