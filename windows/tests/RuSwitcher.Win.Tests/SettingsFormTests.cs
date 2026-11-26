@@ -67,7 +67,8 @@ public class SettingsFormTests
                 Assert.True(hint.Top >= tabs.Bottom);
                 var normal = form.ClientSize;
                 CheckNavigation(tabs);
-                CheckPages(tabs, expectFit: normal.Height >= form.LogicalToDeviceUnits(570));
+                // Multiple tab rows reduce the content height at larger navigation font sizes.
+                CheckPages(tabs, expectFit: !largerNavigationText && normal.Height >= form.LogicalToDeviceUnits(570));
 
                 // Reduced working areas keep the footer visible and let pages scroll independently.
                 form.ClientSize = new Size(normal.Width, normal.Height - form.LogicalToDeviceUnits(160));
