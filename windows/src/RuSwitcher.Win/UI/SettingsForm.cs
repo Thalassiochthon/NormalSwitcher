@@ -9,19 +9,11 @@ namespace RuSwitcher.Win.UI;
 /// <summary>Settings shared with the tray and the running keyboard detectors.</summary>
 internal sealed class SettingsForm : Form
 {
-    private readonly ColumnStyle _navigationColumn;
-    private readonly Panel _sidebar;
-    private readonly TableLayoutPanel _navigation;
-    private readonly RowStyle _headingRow;
+    private readonly TabControl _tabs;
+    private readonly Label _saveHint;
     private readonly RowStyle _footerRow;
-    private readonly Panel _pages;
-    private readonly Label _heading;
     private readonly Color _accent = SystemInformation.HighContrast ? SystemColors.HotTrack : Color.FromArgb(91, 52, 166);
-    private readonly Color _selected = SystemInformation.HighContrast ? SystemColors.Highlight : Color.FromArgb(233, 224, 253);
-    private readonly Color _navigationSurface = SystemInformation.HighContrast ? SystemColors.Window : Color.FromArgb(246, 243, 251);
-    private readonly List<(Button Button, Panel Page)> _sections = new();
     private Bitmap? _aboutIcon;
-    private int _activeSection;
 
     public event Action<TriggerKind>? TriggerChanged;
     public event Action? SwitchChanged;
@@ -45,44 +37,31 @@ internal sealed class SettingsForm : Form
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
         SuspendLayout();
 
-        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-        _navigationColumn = new ColumnStyle(SizeType.Absolute, 194);
-        shell.ColumnStyles.Add(_navigationColumn);
+        var shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty,
+            Padding = new Padding(12, 12, 12, 0)
+        };
         shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _footerRow = new RowStyle(SizeType.Absolute, 36);
+        shell.RowStyles.Add(_footerRow);
         Controls.Add(shell);
 
-        _sidebar = new Panel
+        _tabs = new TabControl
         {
-            Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = _navigationSurface, AutoScroll = true,
-            Padding = new Padding(12, 26, 12, 12)
+            Name = "settingsTabs", Dock = DockStyle.Fill, Margin = Padding.Empty,
+            Alignment = TabAlignment.Top, Multiline = true, Padding = new Point(10, 5),
+            AccessibleName = L10n.T("settings.title")
         };
-        shell.Controls.Add(_sidebar, 0, 0);
-        _navigation = Stack();
-        _sidebar.Controls.Add(_navigation);
-        var brand = TextLabel("NormalSwitcher", 11, FontStyle.Bold);
-        brand.Dock = DockStyle.Fill;
-        brand.Padding = new Padding(8, 0, 0, 18);
-        brand.ForeColor = _accent;
-        _navigation.Controls.Add(brand);
-
-        var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
-        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        _headingRow = new RowStyle(SizeType.Absolute, 84);
-        _footerRow = new RowStyle(SizeType.Absolute, 64);
-        content.RowStyles.Add(_headingRow);
-        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        content.RowStyles.Add(_footerRow);
-        shell.Controls.Add(content, 1, 0);
-
-        _heading = TextLabel("", 22, FontStyle.Bold);
-        _heading.Dock = DockStyle.Fill;
-        _heading.TextAlign = ContentAlignment.MiddleLeft;
-        _heading.Padding = new Padding(26, 0, 0, 0);
-        _heading.AccessibleRole = AccessibleRole.StaticText;
-        content.Controls.Add(_heading, 0, 0);
-        _pages = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-        content.Controls.Add(_pages, 0, 1);
+        shell.Controls.Add(_tabs, 0, 0);
+        _saveHint = new Label
+        {
+            Name = "settingsSaveHint", Text = L10n.T("settings.autosave"), Dock = DockStyle.Fill,
+            Margin = Padding.Empty, Padding = new Padding(6, 0, 6, 0),
+            Font = new Font("Segoe UI", 9F), TextAlign = ContentAlignment.MiddleLeft
+        };
+        shell.Controls.Add(_saveHint, 0, 1);
 
         var installedLayouts = LayoutSwitcher.Installed();
         IntPtr[] layouts = [IntPtr.Zero, .. installedLayouts];
@@ -241,18 +220,6 @@ internal sealed class SettingsForm : Form
             Link(L10n.T("settings.credit"), "https://github.com/rashn/RuSwitcher"),
             Link("FrequencyWords · CC BY-SA 4.0", "https://github.com/antonjas/NormalSwitcher/blob/personal/dicts/LICENSE"));
 
-        var close = new Button { Text = L10n.T("settings.close"), AutoSize = true, DialogResult = DialogResult.OK,
-            MinimumSize = new Size(106, 32) };
-        var footer = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(20, 12, 22, 0), Margin = Padding.Empty
-        };
-        footer.Controls.Add(close);
-        CancelButton = close;
-        content.Controls.Add(footer, 0, 2);
-
-        SelectSection(0);
         ResumeLayout(performLayout: true);
 
         void SetAppearance(Action change)
@@ -285,9 +252,8 @@ internal sealed class SettingsForm : Form
             return base.ProcessCmdKey(ref msg, keyData);
 
         int direction = keyData.HasFlag(Keys.Shift) ? -1 : 1;
-        int index = (_activeSection + direction + _sections.Count) % _sections.Count;
-        SelectSection(index);
-        _sections[index].Button.Focus();
+        _tabs.SelectedIndex = (_tabs.SelectedIndex + direction + _tabs.TabCount) % _tabs.TabCount;
+        _tabs.Focus();
         return true;
     }
 
@@ -299,29 +265,11 @@ internal sealed class SettingsForm : Form
 
     private void FitWorkingArea()
     {
-        // Absolute table rows and columns can keep their design-time pixel sizes on a scaled display.
-        // Measure the live fonts and recalculate the absolute sizes from logical units.
-        using var graphics = CreateGraphics();
-        int width = 0;
-        foreach (Control item in _navigation.Controls)
-        {
-            var text = TextRenderer.MeasureText(graphics, item.Text, item.Font);
-            width = Math.Max(width, text.Width + item.Padding.Horizontal + item.Margin.Horizontal);
-            if (item is Button button)
-                button.Height = Math.Max(LogicalToDeviceUnits(39), text.Height + LogicalToDeviceUnits(12));
-            else
-                item.MinimumSize = new Size(0, text.Height + item.Padding.Vertical);
-        }
-        _navigationColumn.Width = Math.Max(LogicalToDeviceUnits(194),
-            width + _sidebar.Padding.Horizontal + LogicalToDeviceUnits(24));
-        _headingRow.Height = Math.Max(LogicalToDeviceUnits(84),
-            TextRenderer.MeasureText(graphics, _heading.Text, _heading.Font).Height + LogicalToDeviceUnits(16));
-        _footerRow.Height = Math.Max(LogicalToDeviceUnits(64),
-            CancelButton is Control close ? close.GetPreferredSize(Size.Empty).Height + LogicalToDeviceUnits(20) : 0);
+        _footerRow.Height = Math.Max(LogicalToDeviceUnits(36),
+            _saveHint.Font.Height + LogicalToDeviceUnits(12));
 
         var area = Screen.FromControl(this).WorkingArea;
-        int preferredWidth = (int)_navigationColumn.Width + LogicalToDeviceUnits(566);
-        var preferred = SizeFromClientSize(new Size(preferredWidth, LogicalToDeviceUnits(570)));
+        var preferred = SizeFromClientSize(new Size(LogicalToDeviceUnits(760), LogicalToDeviceUnits(570)));
         Size = new Size(Math.Min(preferred.Width, area.Width), Math.Min(preferred.Height, area.Height));
         Location = new Point(
             Math.Clamp(Left, area.Left, area.Right - Width),
@@ -330,21 +278,12 @@ internal sealed class SettingsForm : Form
 
     private void AddPage(string name, params Control[] controls)
     {
-        int index = _sections.Count;
-        var button = new Button
+        var page = new TabPage(L10n.T("settings.tab." + name))
         {
-            Text = L10n.T("settings.tab." + name), TextAlign = ContentAlignment.MiddleLeft,
-            Height = 39, Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 3),
-            FlatStyle = FlatStyle.Flat, Padding = new Padding(9, 0, 3, 0),
-            UseVisualStyleBackColor = false
+            Name = name, AutoScroll = true, UseVisualStyleBackColor = true
         };
-        button.FlatAppearance.BorderSize = 0;
-        button.Click += (_, _) => SelectSection(index);
-        _navigation.Controls.Add(button);
-
-        var page = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Visible = false, Name = name };
         var stack = Stack();
-        stack.Padding = new Padding(26, 4, 24, 6);
+        stack.Padding = new Padding(18, 18, 16, 10);
         foreach (var control in controls)
         {
             control.Margin = new Padding(0, 0, 0, 8);
@@ -361,23 +300,7 @@ internal sealed class SettingsForm : Form
         page.ClientSizeChanged += (_, _) => WrapRows();
         page.DpiChangedAfterParent += (_, _) => WrapRows();
         page.Controls.Add(stack);
-        _pages.Controls.Add(page);
-        _sections.Add((button, page));
-    }
-
-    private void SelectSection(int index)
-    {
-        _activeSection = index;
-        foreach (var (button, page) in _sections)
-        {
-            bool active = ReferenceEquals(page, _sections[index].Page);
-            page.Visible = active;
-            button.BackColor = active ? _selected : _navigationSurface;
-            button.ForeColor = active
-                ? SystemInformation.HighContrast ? SystemColors.HighlightText : _accent
-                : SystemColors.WindowText;
-        }
-        _heading.Text = _sections[index].Button.Text;
+        _tabs.TabPages.Add(page);
     }
 
     private static TableLayoutPanel Stack()
