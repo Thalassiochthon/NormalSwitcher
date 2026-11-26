@@ -23,7 +23,8 @@ final class CaretIndicator: NSObject {
     private var showsTranslation = false
     private var translationPopover: NSPopover?
     private var translationOwner: pid_t?
-    var translationInput: () -> CaretTranslationInput? = { nil }
+    var translationInput: () -> CaretTranslationRequest? = { nil }
+    var onTranslationInserted: () -> Void = {}
     private var refreshTimer: Timer?
     private var persistent = false
     var canCorrect: () -> Bool = { false }
@@ -138,26 +139,60 @@ final class CaretIndicator: NSObject {
         }
     }
 
+    func openTranslationFromHotkey() {
+        guard showsTranslation else { return }
+        showAtCaret(layoutChanged: true)
+        translate()
+    }
+
     @objc private func translate() {
         guard #available(macOS 15.0, *), showsTranslation, visible,
               !AutoSwitchPolicy.secureInputActive,
-              let owner = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
+              let app = NSWorkspace.shared.frontmostApplication else { return }
+        let owner = app.processIdentifier
         if translationPopover?.isShown == true {
             closeTranslation()
             return
         }
-        let input = translationInput()
+        let request = translationInput()
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == owner,
               !AutoSwitchPolicy.secureInputActive else { return }
         let popover = NSPopover()
         // Keep the session's view alive while macOS asks to download a language.
         popover.behavior = .applicationDefined
-        popover.contentViewController = NSHostingController(rootView: CaretTranslationView(input: input) { [weak self] in
-            self?.closeTranslation()
-        })
+        let replace: ((String) async -> Bool)? = request?.replaceSelection.map { apply in
+            { [weak self, weak popover] text in
+                guard let self, let popover else { return false }
+                return await self.insertTranslation(text, in: app, from: popover, replace: apply)
+            }
+        }
+        popover.contentViewController = NSHostingController(rootView: CaretTranslationView(
+            input: request?.input, insert: replace, close: { [weak self] in self?.closeTranslation() }
+        ))
         translationPopover = popover
         translationOwner = owner
         popover.show(relativeTo: translationButton.bounds, of: translationButton, preferredEdge: .maxY)
+    }
+
+    private func insertTranslation(_ text: String, in app: NSRunningApplication, from popover: NSPopover,
+                                   replace: (String) -> Bool) async -> Bool {
+        let owner = app.processIdentifier
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        guard translationPopover === popover, !app.isTerminated, !AutoSwitchPolicy.secureInputActive else { return false }
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == ownPID {
+            app.activate(options: [])
+            for _ in 0..<6 {
+                guard translationPopover === popover, !AutoSwitchPolicy.secureInputActive else { return false }
+                let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                if front == owner { break }
+                guard front == nil || front == ownPID else { return false }
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+        }
+        guard translationPopover === popover, replace(text) else { return false }
+        onTranslationInserted()
+        closeTranslation()
+        return true
     }
 
     private func closeTranslation() {

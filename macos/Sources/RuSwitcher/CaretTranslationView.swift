@@ -11,20 +11,26 @@ struct CaretTranslationView: View {
 
     private static let targetCodes = ["ru", "en", "es"]
     private let input: CaretTranslationInput?
+    private let insert: ((String) async -> Bool)?
     private let close: () -> Void
     @State private var languages: Languages
     @State private var availableSources: [String]
     @State private var result: String?
     @State private var failure: String?
     @State private var copied = false
+    @State private var inserting = false
+    @State private var insertionFailed = false
 
-    init(input: CaretTranslationInput?, close: @escaping () -> Void) {
+    init(input: CaretTranslationInput?, insert: ((String) async -> Bool)?, close: @escaping () -> Void) {
         self.input = input
+        self.insert = insert
         self.close = close
         let source = input?.sourceLanguage ?? ""
         let preferred = L10n.languageCode == "ru" ? "ru" : "en"
-        _languages = State(initialValue: Languages(source: source, target: source == preferred
-                                                   ? (preferred == "ru" ? "en" : "ru") : preferred))
+        let defaultTarget = source == preferred ? (preferred == "ru" ? "en" : "ru") : preferred
+        let saved = SettingsManager.shared.caretTranslationTargets[source]
+        let target = saved.flatMap { Self.targetCodes.contains($0) && $0 != source ? $0 : nil } ?? defaultTarget
+        _languages = State(initialValue: Languages(source: source, target: target))
         _availableSources = State(initialValue: Self.targetCodes)
     }
 
@@ -52,15 +58,17 @@ struct CaretTranslationView: View {
                     Text(taskText("The text is already in that language.", "Текст уже на этом языке."))
                         .foregroundStyle(.secondary)
                 } else if let result {
-                    ScrollView {
-                        Text(result)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                    .frame(maxHeight: 145)
-                    Button(copied ? taskText("Copied", "Скопировано") : taskText("Copy", "Копировать")) {
-                        NSPasteboard.general.clearContents()
-                        copied = NSPasteboard.general.setString(result, forType: .string)
+                    Text(result)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(8)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    resultActions(result)
+                    if insertionFailed {
+                        Text(taskText("Check that the original text is still selected, or copy the translation.",
+                                      "Проверьте исходное выделение или скопируйте перевод."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 } else if let failure {
                     Text(failure).foregroundStyle(.secondary)
@@ -88,8 +96,39 @@ struct CaretTranslationView: View {
             result = nil
             failure = nil
             copied = false
+            insertionFailed = false
         }
         .translationTask(configuration, action: translateAction(requested: languages))
+    }
+
+    private func resultActions(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            if let insert {
+                Button(taskText("Insert", "Вставить")) {
+                    inserting = true
+                    insertionFailed = false
+                    Task {
+                        let succeeded = await insert(text)
+                        inserting = false
+                        insertionFailed = !succeeded
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                Button { copy(text) } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                }
+                .help(copied ? taskText("Copied", "Скопировано") : taskText("Copy", "Копировать"))
+                .accessibilityLabel(taskText("Copy translation", "Скопировать перевод"))
+            } else {
+                Button(copied ? taskText("Copied", "Скопировано") : taskText("Copy", "Копировать")) { copy(text) }
+            }
+        }
+        .disabled(inserting)
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        copied = NSPasteboard.general.setString(text, forType: .string)
     }
 
     private var languageMenus: some View {
@@ -104,7 +143,15 @@ struct CaretTranslationView: View {
             }
             .help(taskText("Source language", "Исходный язык"))
             Image(systemName: "arrow.right").foregroundStyle(.secondary).accessibilityHidden(true)
-            Picker(taskText("Target language", "Язык перевода"), selection: $languages.target) {
+            Picker(taskText("Target language", "Язык перевода"), selection: Binding(
+                get: { languages.target },
+                set: { target in
+                    languages.target = target
+                    if !languages.source.isEmpty, languages.source != target {
+                        SettingsManager.shared.caretTranslationTargets[languages.source] = target
+                    }
+                }
+            )) {
                 ForEach(Self.targetCodes, id: \.self) { code in
                     Text(languageName(code)).tag(code)
                 }
@@ -114,6 +161,7 @@ struct CaretTranslationView: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .controlSize(.small)
+        .disabled(inserting)
     }
 
     nonisolated private static func supportedSourceCodes() async -> [String] {

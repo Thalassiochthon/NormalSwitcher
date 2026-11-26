@@ -124,6 +124,7 @@ final class KeyboardMonitor: @unchecked Sendable {
     var onCaseHotkey: (() -> Void)?
     var onLayoutHotkey: ((Int) -> Void)?
     var onExceptionHotkey: (() -> Void)?
+    var onTranslationHotkey: (() -> Void)?
 
     // Детект соло-тапа модификатора
     private var triggerArmed = false
@@ -605,6 +606,7 @@ final class KeyboardMonitor: @unchecked Sendable {
                 case .layout1: self.onLayoutHotkey?(1)
                 case .layout2: self.onLayoutHotkey?(2)
                 case .addException: self.onExceptionHotkey?()
+                case .translate: self.onTranslationHotkey?()
                 case .trigger: break
                 }
             }

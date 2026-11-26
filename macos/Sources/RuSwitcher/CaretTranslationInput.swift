@@ -1,6 +1,11 @@
 import Foundation
 import NaturalLanguage
 
+struct CaretTranslationRequest {
+    let input: CaretTranslationInput
+    let replaceSelection: ((String) -> Bool)?
+}
+
 struct CaretTranslationInput {
     let text: String
     let typingLanguage: String?

@@ -9,6 +9,7 @@ final class TextConverter {
     private var lastBoundaryCount = 0
     private var savedClipboardItems: [NSPasteboardItem]?
     private var clipboardRestoreWork: DispatchWorkItem?
+    private var translationClipboardVersion: Int?
     /// Буфер реально менялся: выделение, прочитанное через AX, его не трогает, и при отказе
     /// от конверсии переписывать нечего.
     private var clipboardDirty = false
@@ -554,7 +555,7 @@ final class TextConverter {
 
     /// Reads an explicit selection or verifies the tracked word against the current field.
     /// Translation never synthesizes a selection or reads the clipboard.
-    func translationInput(pid: pid_t, typedSuffix: String?, typingLanguage: String?) -> CaretTranslationInput? {
+    func translationInput(pid: pid_t, typedSuffix: String?, typingLanguage: String?) -> CaretTranslationRequest? {
         let deadline = ProcessInfo.processInfo.systemUptime + 0.12
         guard !isConverting, !AutoSwitchPolicy.secureInputActive,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
@@ -562,18 +563,12 @@ final class TextConverter {
         let element = focus.element
         AXUIElementSetMessagingTimeout(element, 0.006)
         guard axAttribute(element, kAXSubroleAttribute as CFString) as? String != (kAXSecureTextFieldSubrole as String),
-              let selection = Self.axRange(axAttribute(element, kAXSelectedTextRangeAttribute as CFString))
-                ?? (axAttribute(element, kAXSelectedTextRangesAttribute as CFString) as? [AnyObject])
-                    .flatMap({ $0.count == 1 ? Self.axRange($0[0]) : nil })
-        else { return nil }
+              let selection = translationSelectionRange(in: element) else { return nil }
 
         func read(_ range: CFRange) -> String? {
             guard range.length <= 560, ProcessInfo.processInfo.systemUptime + 0.006 < deadline else { return nil }
-            if selection.length > 0,
-               let selected = axAttribute(element, kAXSelectedTextAttribute as CFString) as? String {
-                return selected
-            }
-            return readEditorText(element, range: range, deadline: deadline)
+            return selection.length > 0 ? readTranslationSelection(in: element, range: range, deadline: deadline)
+                : readEditorText(element, range: range, deadline: deadline)
         }
 
         let text: String?
@@ -590,7 +585,84 @@ final class TextConverter {
               !AutoSwitchPolicy.secureInputActive,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
               orderedFocusMatches(focus, pid: pid, deadline: deadline) else { return nil }
-        return CaretTranslationInput(text: input, typingLanguage: selection.length == 0 ? typingLanguage : nil)
+        let inputText = CaretTranslationInput(text: input, typingLanguage: selection.length == 0 ? typingLanguage : nil)
+        guard selection.length > 0, let text, text.utf16.count == selection.length else {
+            return CaretTranslationRequest(input: inputText, replaceSelection: nil)
+        }
+        return CaretTranslationRequest(input: inputText) { [weak self] replacement in
+            self?.replaceTranslationSelection(focus: focus, range: selection, original: text, with: replacement) == true
+        }
+    }
+
+    private func translationSelectionRange(in element: AXUIElement) -> CFRange? {
+        if let ranges = axAttribute(element, kAXSelectedTextRangesAttribute as CFString) as? [AnyObject],
+           !ranges.isEmpty {
+            return ranges.count == 1 ? Self.axRange(ranges[0]) : nil
+        }
+        return Self.axRange(axAttribute(element, kAXSelectedTextRangeAttribute as CFString))
+    }
+
+    private func readTranslationSelection(in element: AXUIElement, range: CFRange, deadline: TimeInterval) -> String? {
+        if let selected = axAttribute(element, kAXSelectedTextAttribute as CFString) as? String,
+           selected.utf16.count == range.length {
+            return selected
+        }
+        return readEditorText(element, range: range, deadline: deadline)
+    }
+
+    nonisolated static func translationSelectionMatches(_ range: CFRange, text: String,
+                                                         current: CFRange?, selected: String?) -> Bool {
+        guard let current, let selected, range.length > 0, range.length == text.utf16.count else { return false }
+        return range.location == current.location && range.length == current.length
+            && selected.utf16.elementsEqual(text.utf16)
+    }
+
+    private func replaceTranslationSelection(focus: OrderedFocus, range: CFRange,
+                                             original: String, with translation: String) -> Bool {
+        let pid = focus.pid
+        func targetIsActive() -> Bool {
+            guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier == pid else { return false }
+            return !AutoSwitchPolicy.secureInputActive && !AutoSwitchPolicy.shouldDeferToRemoteClient
+                && !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier)
+        }
+
+        guard !translation.isEmpty, !clipboardDirty, !isConverting, targetIsActive(),
+              let source = Self.makeSource(),
+              let (down, up) = Self.keyEvents(source: source, keyCode: KC.letterV, flags: .maskCommand)
+        else { return false }
+
+        let pasteboard = NSPasteboard.general
+        let version = pasteboard.changeCount
+        let saved = snapshotPasteboard(pasteboard)
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.12
+        let element = focus.element
+        AXUIElementSetMessagingTimeout(element, 0.006)
+        guard orderedFocusMatches(focus, pid: pid, deadline: deadline),
+              axAttribute(element, kAXSubroleAttribute as CFString) as? String != (kAXSecureTextFieldSubrole as String),
+              let current = translationSelectionRange(in: element),
+              current.location == range.location, current.length == range.length,
+              Self.translationSelectionMatches(range, text: original, current: current,
+                  selected: readTranslationSelection(in: element, range: current, deadline: deadline)),
+              ProcessInfo.processInfo.systemUptime < deadline, targetIsActive(),
+              pasteboard.changeCount == version else { return false }
+
+        let replacement = String(original.prefix(while: \.isWhitespace)) + translation
+            + String(original.reversed().prefix(while: \.isWhitespace).reversed())
+        let item = NSPasteboardItem()
+        guard item.setString(replacement, forType: .string) else { return false }
+        for type in Self.transientTypes { item.setData(Data(), forType: type) }
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([item]) else {
+            writeBackClipboard(saved)
+            return false
+        }
+        savedClipboardItems = saved
+        clipboardDirty = true
+        scheduleClipboardRestore(onlyIfChangeCount: pasteboard.changeCount)
+        clearState()
+        down.postToPid(pid)
+        up.postToPid(pid)
+        return true
     }
 
     nonisolated static func shortTranslationInput(_ text: String?) -> String? {
@@ -1398,6 +1470,11 @@ final class TextConverter {
     private func cancelClipboardRestore() {
         clipboardRestoreWork?.cancel()
         clipboardRestoreWork = nil
+        if let version = translationClipboardVersion, NSPasteboard.general.changeCount != version {
+            savedClipboardItems = nil
+            clipboardDirty = false
+        }
+        translationClipboardVersion = nil
     }
 
     /// Пометки nspasteboard.org: менеджеры буфера обмена не заносят такую запись в историю (#44).
@@ -1443,15 +1520,10 @@ final class TextConverter {
         "com.realvnc.vncviewer", "com.carriez.rustdesk",
     ]
 
-    private func scheduleClipboardRestore() {
+    private func scheduleClipboardRestore(onlyIfChangeCount version: Int? = nil) {
         cancelClipboardRestore()
-        let saved = self.savedClipboardItems
-        let work = DispatchWorkItem { [weak self] in
-            self?.writeBackClipboard(saved ?? [])
-            self?.clipboardDirty = false
-            self?.savedClipboardItems = nil
-            rslog("clipboard restored (\(saved?.count ?? 0) items)")
-        }
+        translationClipboardVersion = version
+        let work = DispatchWorkItem { [weak self] in self?.restoreClipboardNow() }
         clipboardRestoreWork = work
         let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let slow = AutoSwitchPolicy.isRemoteDesktopClient(frontID) || frontID.map(Self.slowClipboardApps.contains) == true

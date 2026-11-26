@@ -483,6 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.keyboardMonitor.withTapSuspended(body)
         }
         keyboardMonitor.onUserInput = { [weak self] in self?.caretIndicator?.userTyped() }  // issue #10
+        keyboardMonitor.onTranslationHotkey = { [weak self] in self?.caretIndicator?.openTranslationFromHotkey() }
         // issue #14: хоткей чистого переключения раскладки (без конверсии). Буфер после
         // явной смены раскладки неактуален — тот же паттерн, что per-app restore и меню.
         keyboardMonitor.onSwitchHotkey = { [weak self] in
@@ -1363,6 +1364,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 indicator.canCorrect = { [weak self] in self?.keyboardMonitor.caretWord() != nil }
                 indicator.resolvedEditor = { [weak self] in self?.textConverter.verifiedEditorForCaret(pid: $0) }
                 indicator.translationInput = { [weak self] in self?.caretTranslationInput() }
+                indicator.onTranslationInserted = { [weak self] in
+                    self?.keyboardMonitor.resetInputTracking()
+                    self?.lastAutoConverted = nil
+                }
                 indicator.onCorrect = { [weak self] in self?.correctCaretWord() }
                 caretIndicator = indicator
                 keyboardMonitor.caretControlHitTest = { [weak indicator] in
@@ -1379,7 +1384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func caretTranslationInput() -> CaretTranslationInput? {
+    private func caretTranslationInput() -> CaretTranslationRequest? {
         guard let app = NSWorkspace.shared.frontmostApplication,
               !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
               !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier),

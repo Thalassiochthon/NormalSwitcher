@@ -57,6 +57,7 @@ final class SettingsManager: @unchecked Sendable {
         static let migratedLayoutSounds = "com.antonjas.normalswitcher.migratedLayoutSounds"
         static let layoutSound = "com.antonjas.normalswitcher.layoutSound"
         static let caretTranslation = "com.ruswitcher.caretTranslation"
+        static let caretTranslationTargets = "com.ruswitcher.caretTranslationTargets"
         static let caretTools = "com.ruswitcher.caretTools"
         static let caretLearnsCorrections = "com.ruswitcher.caretLearnsCorrections"
         static let caretFlag = "com.ruswitcher.caretFlag"
@@ -293,7 +294,7 @@ final class SettingsManager: @unchecked Sendable {
             return HotkeySetting(key: switchHotkey, side: side(right: switchRightOnly, left: Keys.switchLeftOnly), doubleTap: switchDoubleTap)
         case .changeCase:
             return HotkeySetting(key: caseHotkey, side: side(right: caseRightOnly, left: Keys.caseLeftOnly), doubleTap: caseDoubleTap)
-        case .layout1, .layout2, .addException:
+        case .layout1, .layout2, .addException, .translate:
             let id = slot.rawValue
             return HotkeySetting(key: defaults.string(forKey: Keys.hotkeyKey(id)) ?? "",
                                  side: HotkeySide(rawValue: defaults.string(forKey: Keys.hotkeySide(id)) ?? "") ?? .any,
@@ -318,7 +319,7 @@ final class SettingsManager: @unchecked Sendable {
             caseRightOnly = value.side == .right
             defaults.set(value.side == .left, forKey: Keys.caseLeftOnly)
             caseDoubleTap = value.doubleTap
-        case .layout1, .layout2, .addException:
+        case .layout1, .layout2, .addException, .translate:
             let id = slot.rawValue
             defaults.set(value.key, forKey: Keys.hotkeyKey(id))
             defaults.set(value.side.rawValue, forKey: Keys.hotkeySide(id))
@@ -400,6 +401,11 @@ final class SettingsManager: @unchecked Sendable {
     var caretTools: Bool {
         get { defaults.bool(forKey: Keys.caretTools) }
         set { defaults.set(newValue, forKey: Keys.caretTools) }
+    }
+
+    var caretTranslationTargets: [String: String] {
+        get { defaults.dictionary(forKey: Keys.caretTranslationTargets) as? [String: String] ?? [:] }
+        set { defaults.set(newValue, forKey: Keys.caretTranslationTargets) }
     }
 
     var caretTranslation: Bool {

@@ -214,12 +214,18 @@ final class SettingsWindowController {
     private func createHotkeysTab() -> NSView {
         let trigger = hotkeyRow(.trigger, L10n.settingsTrigger, hint: L10n.settingsManualCorrectionHint)
         let switchLayout = hotkeyRow(.switchLayout, L10n.settingsSwitchHotkey, hint: L10n.settingsSwitchLayoutHint)
-        let extra = SettingsDisclosure(title: L10n.settingsGroupExtraShortcuts, views: [
+        var extraRows = [
             hotkeyRow(.layout1, hotkeyTitle(.layout1)),
             hotkeyRow(.layout2, hotkeyTitle(.layout2)),
             hotkeyRow(.changeCase, L10n.settingsCaseHotkey),
             hotkeyRow(.addException, L10n.settingsHotkeyException, hint: L10n.settingsHotkeyExceptionHint),
-        ])
+        ]
+        if #available(macOS 15.0, *) {
+            extraRows.append(hotkeyRow(.translate, taskText("Translate text", "Перевести текст"),
+                                       hint: taskText("Enable the Translate button in Advanced settings.",
+                                                      "Включите кнопку перевода в расширенных настройках.")))
+        }
+        let extra = SettingsDisclosure(title: L10n.settingsGroupExtraShortcuts, views: extraRows)
         refreshHotkeyControls()
         return scrollable([trigger, NSBox.separator(), switchLayout, NSBox.separator(), extra])
     }

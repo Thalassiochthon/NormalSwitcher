@@ -26,7 +26,7 @@ struct HotkeySetting: Equatable {
 
 /// Хоткеи в порядке приоритета: при конфликте работает тот, что выше.
 enum HotkeySlot: String, CaseIterable {
-    case trigger, switchLayout, changeCase, layout1, layout2, addException
+    case trigger, switchLayout, changeCase, layout1, layout2, addException, translate
 }
 
 /// Конфигурация клавиши-триггера (читается из настроек, кэшируется в KeyboardMonitor).

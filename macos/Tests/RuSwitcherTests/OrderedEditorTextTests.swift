@@ -12,6 +12,17 @@ struct OrderedEditorTextTests {
         #expect(TextConverter.shortTranslationInput(String(repeating: "🙂", count: 281)) == nil)
     }
 
+    @Test func translationPasteRequiresSameSelectionAndExactText() {
+        let original = CFRange(location: 4, length: 11)
+        let source = " Привет мир"
+        #expect(TextConverter.translationSelectionMatches(original, text: source, current: original, selected: source))
+        #expect(!TextConverter.translationSelectionMatches(original, text: source,
+            current: CFRange(location: 5, length: 11), selected: source))
+        #expect(!TextConverter.translationSelectionMatches(original, text: source, current: original, selected: " привет мир"))
+        #expect(!TextConverter.translationSelectionMatches(original, text: source, current: original, selected: "Привет мир"))
+        #expect(!TextConverter.translationSelectionMatches(original, text: source, current: nil, selected: nil))
+    }
+
     @Test func caretRangeUsesUTF16Offsets() {
         let text = "🙂 ghbdtn"
         #expect(TextConverter.textInRange(text, range: CFRange(location: 3, length: 6)) == "ghbdtn")
