@@ -1379,21 +1379,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func caretTranslationInput() -> String? {
+    private func caretTranslationInput() -> CaretTranslationInput? {
         guard let app = NSWorkspace.shared.frontmostApplication,
               !AutoSwitchPolicy.secureInputActive, !AutoSwitchPolicy.shouldDeferToRemoteClient,
               !AutoSwitchPolicy.isDeniedApp(app.bundleIdentifier),
               app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
 
         var typedSuffix: String?
+        var typingLanguage: String?
         if let (candidate, spaces) = keyboardMonitor.caretWord(),
            candidate.pid == app.processIdentifier,
            LayoutSwitcher.currentLayoutID() == candidate.layoutID,
            LayoutSwitcher.currentSourceIsKeyboardLayout(),
            let word = DynamicKeyMapping.lineString(from: candidate.keys) {
             typedSuffix = word + String(repeating: " ", count: spaces)
+            typingLanguage = LayoutSwitcher.currentLanguageCode()
         }
-        return textConverter.translationInput(pid: app.processIdentifier, typedSuffix: typedSuffix)
+        return textConverter.translationInput(pid: app.processIdentifier, typedSuffix: typedSuffix,
+                                              typingLanguage: typingLanguage)
     }
 
     private func correctCaretWord() {

@@ -23,7 +23,7 @@ final class CaretIndicator: NSObject {
     private var showsTranslation = false
     private var translationPopover: NSPopover?
     private var translationOwner: pid_t?
-    var translationInput: () -> String? = { nil }
+    var translationInput: () -> CaretTranslationInput? = { nil }
     private var refreshTimer: Timer?
     private var persistent = false
     var canCorrect: () -> Bool = { false }
@@ -150,8 +150,11 @@ final class CaretIndicator: NSObject {
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == owner,
               !AutoSwitchPolicy.secureInputActive else { return }
         let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: CaretTranslationView(text: input))
+        // Keep the session's view alive while macOS asks to download a language.
+        popover.behavior = .applicationDefined
+        popover.contentViewController = NSHostingController(rootView: CaretTranslationView(input: input) { [weak self] in
+            self?.closeTranslation()
+        })
         translationPopover = popover
         translationOwner = owner
         popover.show(relativeTo: translationButton.bounds, of: translationButton, preferredEdge: .maxY)

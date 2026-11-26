@@ -554,7 +554,7 @@ final class TextConverter {
 
     /// Reads an explicit selection or verifies the tracked word against the current field.
     /// Translation never synthesizes a selection or reads the clipboard.
-    func translationInput(pid: pid_t, typedSuffix: String?) -> String? {
+    func translationInput(pid: pid_t, typedSuffix: String?, typingLanguage: String?) -> CaretTranslationInput? {
         let deadline = ProcessInfo.processInfo.systemUptime + 0.12
         guard !isConverting, !AutoSwitchPolicy.secureInputActive,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
@@ -590,7 +590,7 @@ final class TextConverter {
               !AutoSwitchPolicy.secureInputActive,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
               orderedFocusMatches(focus, pid: pid, deadline: deadline) else { return nil }
-        return input
+        return CaretTranslationInput(text: input, typingLanguage: selection.length == 0 ? typingLanguage : nil)
     }
 
     nonisolated static func shortTranslationInput(_ text: String?) -> String? {
