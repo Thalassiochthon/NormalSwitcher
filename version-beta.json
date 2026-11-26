@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0w",
-  "build": "99",
+  "version": "1.2.0x",
+  "build": "100",
   "dev": "",
-  "notes": "Плашка появляется справа от текстового курсора, а для письма справа налево — слева. У края экрана она использует свободную сторону.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0w",
-  "sha256": "e9b109cd62b15781f7a24b53e5ce55e059f821e0aaa42d5e9b9336770fcbcadb",
-  "source_commit": "ffe5b65d9a174430a89102f940ab2dec7041407e"
+  "notes": "В ChatGPT и других полях с неполными данными о каретке плашка может определить позицию рядом с соседним символом. Если доступны только границы поля, плашка размещается у его правой стороны.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0x",
+  "sha256": "908fbfa9e73a423afcc8246a147c4bbffefec109bdbfd7e1c1901e3a699eba42",
+  "source_commit": "e9ad14f0221fd6b4ef1cbd0edc08f4021be3c55e"
 }
