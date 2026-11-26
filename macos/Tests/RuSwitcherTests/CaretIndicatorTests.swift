@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Testing
 @testable import RuSwitcher
@@ -47,6 +48,40 @@ struct CaretIndicatorTests {
         #expect(CaretIndicator.aboveCaretOrigin(normal, size: size, visible: visible) == CGPoint(x: -127, y: 122))
         #expect(CaretIndicator.aboveCaretOrigin(nearTop, size: size, visible: visible) == CGPoint(x: -54, y: 255))
         #expect(CaretIndicator.aboveCaretOrigin(notACaret, size: size, visible: visible) == nil)
+    }
+
+    @Test func popoverDoesNotShareTheFormattingToolbarAreaAboveTheSelection() {
+        let visible = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let editor = CGRect(x: 145, y: 10, width: 430, height: 70)
+        let selection = CGRect(x: 165, y: 50, width: 50, height: 18)
+        let size = CGSize(width: 81, height: 21)
+        let formatting = CGRect(x: 110, y: 74, width: 180, height: 34)
+        let origin = CaretIndicator.outsideEditorOrigin(selection: selection, editor: editor, size: size, visible: visible)
+        #expect(origin == CGPoint(x: 56, y: 48.5))
+        if let origin {
+            let badge = CGRect(origin: origin, size: size)
+            #expect(!badge.intersects(editor))
+            #expect(!badge.intersects(formatting))
+        }
+    }
+
+    @Test func editorFallbackUsesTheLowerMarginOrClearsTheFormattingToolbar() {
+        let visible = CGRect(x: 0, y: 0, width: 600, height: 400)
+        let size = CGSize(width: 81, height: 21)
+        let wide = CGRect(x: 10, y: 45, width: 580, height: 70)
+        let narrowMargin = CGRect(x: 10, y: 5, width: 580, height: 70)
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: wide, size: size, visible: visible)?.y == 16)
+        #expect(CaretIndicator.outsideEditorOrigin(selection: nil, editor: narrowMargin, size: size, visible: visible)?.y == 115)
+    }
+
+    @Test func translationPopoverUsesTheNearestAvailableSideOfTheBadge() {
+        let visible = CGRect(x: -900, y: 20, width: 900, height: 600)
+        let left = CGRect(x: -690, y: 70, width: 81, height: 21)
+        let right = CGRect(x: -140, y: 70, width: 81, height: 21)
+        #expect(CaretIndicator.translationEdge(for: left, visible: visible, width: 270) == .maxX)
+        #expect(CaretIndicator.translationEdge(for: right, visible: visible, width: 270) == .minX)
+        #expect(CaretIndicator.translationEdge(for: left, visible: CGRect(x: -740, y: 20, width: 230, height: 600),
+                                              width: 270) == .maxY)
     }
 
     @Test func pointerFallbackStaysOnCurrentDisplay() {

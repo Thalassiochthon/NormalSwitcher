@@ -19,6 +19,9 @@ struct CaretTranslationInput {
             return layout?.minimalIdentifier
         }
 
+        // A standalone English greeting is ambiguous with the Catalan pronoun.
+        if latin, letters.lowercased() == "hi", layout?.languageCode?.identifier != "ca" { return "en" }
+
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(text)
         let guess = recognizer.languageHypotheses(withMaximum: 1).first

@@ -9,6 +9,7 @@ struct CaretTranslationView: View {
         var target: String
     }
 
+    static let panelWidth: CGFloat = 270
     private static let targetCodes = ["ru", "en", "es"]
     private let input: CaretTranslationInput?
     private let insert: ((String) async -> Bool)?
@@ -83,7 +84,7 @@ struct CaretTranslationView: View {
             }
         }
         .padding(12)
-        .frame(width: 270)
+        .frame(width: Self.panelWidth)
         .task {
             guard input != nil else { return }
             let supported = await Self.supportedSourceCodes()

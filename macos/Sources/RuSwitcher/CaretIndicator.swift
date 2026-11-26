@@ -171,7 +171,11 @@ final class CaretIndicator: NSObject {
         ))
         translationPopover = popover
         translationOwner = owner
-        popover.show(relativeTo: translationButton.bounds, of: translationButton, preferredEdge: .maxY)
+        let edge = panel.screen.map {
+            Self.translationEdge(for: panel.frame, visible: $0.visibleFrame, width: CaretTranslationView.panelWidth)
+        } ?? .maxY
+        let anchor = panel.contentView ?? translationButton
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: edge)
     }
 
     private func insertTranslation(_ text: String, in app: NSRunningApplication, from popover: NSPopover,
@@ -275,7 +279,11 @@ final class CaretIndicator: NSObject {
         if persistent {
             if case .known(let rect, _) = caret, positionAboveCaret(rect) {
                 pointerAnchor = nil
-            } else if case .editorWithoutCaret(let frame?) = caret, positionAboveCaret(frame) {
+            } else if case .selection(let bounds, let editor) = caret,
+                      positionOutsideEditor(selection: bounds, editor: editor, pid: app.processIdentifier) {
+                pointerAnchor = nil
+            } else if case .editorWithoutCaret(let frame?) = caret,
+                      positionOutsideEditor(selection: nil, editor: frame, pid: app.processIdentifier) {
                 if !visible || pointerAnchor != nil {
                     rslog("layout-indicator: editor edge app=\(app.bundleIdentifier ?? "unknown")")
                 }
@@ -356,6 +364,55 @@ final class CaretIndicator: NSObject {
             }
         }
         return false
+    }
+
+    static func outsideEditorOrigin(selection: CGRect?, editor: CGRect?, size: CGSize, visible: CGRect) -> CGPoint? {
+        guard let bounds = editor ?? selection, !visible.isNull,
+              size.width <= visible.width, size.height <= visible.height,
+              bounds.intersects(visible) else { return nil }
+        let field = bounds.intersection(visible)
+        let anchor = selection.flatMap { $0.intersects(field) ? $0.intersection(field) : nil }
+        let reference = anchor.map { CGPoint(x: $0.midX, y: $0.midY) }
+            ?? CGPoint(x: field.minX + min(12, field.width / 2), y: field.minY + min(12, field.height / 2))
+        let x = min(max(reference.x - size.width / 2, visible.minX), visible.maxX - size.width)
+        let y = min(max(reference.y - size.height / 2, visible.minY), visible.maxY - size.height)
+        let gap: CGFloat = 8
+        let candidates = [
+            CGPoint(x: field.maxX + gap, y: y),
+            CGPoint(x: field.minX - gap - size.width, y: y),
+            CGPoint(x: x, y: field.minY - gap - size.height),
+        ].filter { visible.contains(CGRect(origin: $0, size: size)) }
+
+        func distance(from origin: CGPoint) -> CGFloat {
+            abs(origin.x + size.width / 2 - reference.x) + abs(origin.y + size.height / 2 - reference.y)
+        }
+        if let nearest = candidates.min(by: { distance(from: $0) < distance(from: $1) }) { return nearest }
+
+        // The editor can fill the window near the screen edge. Leave room for
+        // the app's formatting toolbar above its selected text in that case.
+        let above = CGPoint(x: x, y: field.maxY + 40)
+        return visible.contains(CGRect(origin: above, size: size)) ? above : nil
+    }
+
+    private func positionOutsideEditor(selection: CGRect?, editor: CGRect?, pid: pid_t) -> Bool {
+        guard let anchor = selection ?? editor else { return false }
+        let window = focusedWindowFrame(pid: pid)
+        for screen in NSScreen.screens where screen.frame.intersects(anchor) {
+            let visible = window.map { $0.intersection(screen.visibleFrame) } ?? screen.visibleFrame
+            if let origin = Self.outsideEditorOrigin(selection: selection, editor: editor,
+                                                      size: panel.frame.size, visible: visible) {
+                if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
+                return true
+            }
+        }
+        return false
+    }
+
+    static func translationEdge(for badge: CGRect, visible: CGRect, width: CGFloat) -> NSRectEdge {
+        let required = width + 20
+        if visible.maxX - badge.maxX >= required { return .maxX }
+        if badge.minX - visible.minX >= required { return .minX }
+        return badge.midY > visible.midY ? .minY : .maxY
     }
 
     private func hide() {
@@ -442,6 +499,7 @@ final class CaretIndicator: NSObject {
 
     private enum CaretLocation {
         case known(NSRect, rtl: Bool)
+        case selection(NSRect, editor: NSRect?)
         case editorWithoutCaret(NSRect?)
         case unavailable
         case protectedField
@@ -480,30 +538,48 @@ final class CaretIndicator: NSObject {
         var subrole: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subrole) == .success,
            subrole as? String == kAXSecureTextFieldSubrole { return .protectedField }
-        // Нативные Cocoa → range-путь; веб/Electron → text-marker (приватные AX-атрибуты).
-        let index = insertionIndex(of: element)
-        guard let topLeft = index.flatMap({ insertionBounds(of: element, at: $0) }) ?? axCaretRectViaTextMarker(of: element) else {
+        // Native controls expose character ranges. Web editors may expose text markers instead.
+        let range = selectedRange(of: element)
+        let index = range.flatMap { $0.length == 0 ? $0.location : nil }
+        let nativeCaret = index.flatMap { insertionBounds(of: element, at: $0) }
+        let marker = nativeCaret == nil ? axBoundsViaTextMarker(of: element) : nil
+
+        if persistent, let range, range.length > 0, isEditableField(element) {
+            let editor = editorAnchor(in: element)
+            if let bounds = textBounds(of: element, range: range) ?? marker,
+               bounds.width > 4, let selection = Self.appKitRect(bounds) {
+                return .selection(selection, editor: editor)
+            }
+            return .editorWithoutCaret(editor)
+        }
+        if persistent, range == nil, let marker, marker.width > 4,
+           isEditableField(element), let selection = Self.appKitRect(marker) {
+            return .selection(selection, editor: editorAnchor(in: element))
+        }
+        guard let bounds = nativeCaret ?? marker.flatMap({ Self.isInsertionRect($0) ? $0 : nil }),
+              let rect = Self.appKitRect(bounds) else {
             guard persistent, index != nil || isEditableField(element) else { return .unavailable }
             return .editorWithoutCaret(editorAnchor(in: element))
         }
+
         var rtl = false
         if !persistent, let index {
             // Compare insertion positions on this line; no text content is needed.
             if index < Int.max, let next = insertionBounds(of: element, at: index + 1),
-               abs(topLeft.midY - next.midY) < 1, next.midX != topLeft.midX {
-                rtl = next.midX < topLeft.midX
+               abs(bounds.midY - next.midY) < 1, next.midX != bounds.midX {
+                rtl = next.midX < bounds.midX
             } else if index > 0, let previous = insertionBounds(of: element, at: index - 1),
-                      abs(topLeft.midY - previous.midY) < 1 {
-                rtl = previous.midX > topLeft.midX
+                      abs(bounds.midY - previous.midY) < 1 {
+                rtl = previous.midX > bounds.midX
             }
         }
+        return .known(rect, rtl: rtl)
+    }
 
-        // AX отдаёт глобальные координаты с началом сверху-слева ОСНОВНОГО экрана; AppKit — снизу-слева.
-        // Отражаем по полной высоте основного экрана (screens.first), не по visibleFrame, не по целевому.
-        guard let primary = NSScreen.screens.first else { return .unavailable }
-        var r = topLeft
-        r.origin.y = primary.frame.height - topLeft.origin.y - topLeft.height
-        return .known(r, rtl: rtl)
+    private static func appKitRect(_ rect: CGRect) -> CGRect? {
+        // AX starts at the top of the primary screen; AppKit starts at the bottom.
+        guard let primary = NSScreen.screens.first else { return nil }
+        return CGRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
     }
 
     private func focusedWindowFrame(pid: pid_t) -> NSRect? {
@@ -518,8 +594,7 @@ final class CaretIndicator: NSObject {
     private func editorAnchor(in element: AXUIElement) -> NSRect? {
         guard let frame = accessibilityFrame(of: element),
               frame.width >= 20, (8...400).contains(frame.height) else { return nil }
-        // Use the field's leading edge when its exact insertion point is missing.
-        return NSRect(x: frame.minX + 12, y: frame.minY, width: 0, height: frame.height)
+        return frame
     }
 
     private func accessibilityFrame(of element: AXUIElement) -> NSRect? {
@@ -550,31 +625,38 @@ final class CaretIndicator: NSObject {
         return [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role)
     }
 
-    private func insertionIndex(of element: AXUIElement) -> Int? {
+    private func selectedRange(of element: AXUIElement) -> CFRange? {
         var rangeValue: AnyObject?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
               let rv = rangeValue, CFGetTypeID(rv) == AXValueGetTypeID() else { return nil }
         var range = CFRange(location: 0, length: 0)
         guard AXValueGetValue(rv as! AXValue, .cfRange, &range) else { return nil }
 
-        return range.location >= 0 && range.length == 0 ? range.location : nil
+        return range.location >= 0 && range.length >= 0 ? range : nil
     }
 
     private func insertionBounds(of element: AXUIElement, at index: Int) -> CGRect? {
-        var range = CFRange(location: index, length: 0)
+        guard let bounds = textBounds(of: element, range: CFRange(location: index, length: 0)),
+              Self.isInsertionRect(bounds) else { return nil }
+        return bounds
+    }
+
+    private func textBounds(of element: AXUIElement, range: CFRange) -> CGRect? {
+        var range = range
         guard let arg = AXValueCreate(.cfRange, &range) else { return nil }
         var boundsValue: AnyObject?
         guard AXUIElementCopyParameterizedAttributeValue(
             element, kAXBoundsForRangeParameterizedAttribute as CFString, arg, &boundsValue
         ) == .success else { return nil }
-        return Self.caretBounds(boundsValue)
+        return Self.axTextBounds(boundsValue)
     }
 
-    private static func caretBounds(_ value: AnyObject?) -> CGRect? {
+    private static func axTextBounds(_ value: AnyObject?) -> CGRect? {
         guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var rect = CGRect.zero
         guard AXValueGetValue(value as! AXValue, .cgRect, &rect),
-              isInsertionRect(rect) else { return nil }
+              rect.origin.x.isFinite, rect.origin.y.isFinite,
+              rect.width.isFinite, rect.height.isFinite, rect.width >= 0, rect.height >= 1 else { return nil }
         return rect
     }
 
@@ -606,13 +688,13 @@ final class CaretIndicator: NSObject {
 
     /// Веб/Electron: каретка приходит через AXTextMarker, а не CFRange. Приватные,
     /// недокументированные атрибуты (стабильны на практике годами).
-    private func axCaretRectViaTextMarker(of element: AXUIElement) -> CGRect? {
+    private func axBoundsViaTextMarker(of element: AXUIElement) -> CGRect? {
         var markerRange: AnyObject?
         guard AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &markerRange) == .success,
               let mr = markerRange else { return nil }
         var boundsValue: AnyObject?
         guard AXUIElementCopyParameterizedAttributeValue(
                 element, "AXBoundsForTextMarkerRange" as CFString, mr as CFTypeRef, &boundsValue) == .success else { return nil }
-        return Self.caretBounds(boundsValue)
+        return Self.axTextBounds(boundsValue)
     }
 }

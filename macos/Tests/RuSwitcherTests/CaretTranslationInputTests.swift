@@ -8,6 +8,12 @@ struct CaretTranslationInputTests {
         #expect(CaretTranslationInput(text: "да", typingLanguage: "ru").sourceLanguage == "ru")
     }
 
+    @Test func shortLatinGreetingFallsBackToEnglishWhenLayoutIsUnknownOrCyrillic() {
+        #expect(CaretTranslationInput(text: "Hi", typingLanguage: nil).sourceLanguage == "en")
+        #expect(CaretTranslationInput(text: "Hi", typingLanguage: "ru").sourceLanguage == "en")
+        #expect(CaretTranslationInput(text: "Hi!", typingLanguage: "en-US").sourceLanguage == "en")
+    }
+
     @Test func respectsSpanishAndEnglishText() {
         #expect(CaretTranslationInput(text: "hello", typingLanguage: "en-US").sourceLanguage == "en")
         #expect(CaretTranslationInput(text: "casa", typingLanguage: "es-ES").sourceLanguage == "es")
