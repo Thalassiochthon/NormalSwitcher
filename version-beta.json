@@ -1,9 +1,9 @@
 {
-  "version": "1.2.0v",
-  "build": "98",
+  "version": "1.2.0w",
+  "build": "99",
   "dev": "",
-  "notes": "При выделении текста плашка у курсора обходит поле ввода и инструменты форматирования. Окно перевода открывается сбоку от плашки, когда на экране хватает места. Исправлено определение языка коротких фраз вроде Hi.",
-  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0v",
-  "sha256": "6d0177e31f73ff2df4ce24bd5e6086474196e49acadb7bf19ab8c64d3e6562c9",
-  "source_commit": "6a9ee3d720420c3f2f92e3ea773d853a9fef9a63"
+  "notes": "Плашка появляется справа от текстового курсора, а для письма справа налево — слева. У края экрана она использует свободную сторону.",
+  "url": "https://github.com/Thalassiochthon/NormalSwitcher/releases/tag/v1.2.0w",
+  "sha256": "e9b109cd62b15781f7a24b53e5ce55e059f821e0aaa42d5e9b9336770fcbcadb",
+  "source_commit": "ffe5b65d9a174430a89102f940ab2dec7041407e"
 }
